@@ -1,0 +1,174 @@
+import { sql } from "drizzle-orm";
+import { sqliteTable, text, integer, primaryKey, uniqueIndex, check } from "drizzle-orm/sqlite-core";
+export const profiles = sqliteTable("profiles", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  bio: text("bio").notNull().default(""),
+  skills: text("skills").notNull().default(""),
+  interests: text("interests").notNull().default(""),
+  city: text("city").notNull().default(""),
+  availability: text("availability").notNull().default(""),
+  linkedin: text("linkedin").notNull().default(""),
+  github: text("github").notNull().default(""),
+  visible: integer("visible").notNull().default(0),
+});
+export const organizations = sqliteTable("organizations", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  ownerId: text("owner_id")
+    .notNull()
+    .references(() => profiles.id),
+  description: text("description").notNull().default(""),
+});
+export const events = sqliteTable("events", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id")
+    .notNull()
+    .references(() => organizations.id),
+  title: text("title").notNull(),
+  summary: text("summary").notNull(),
+  rules: text("rules").notNull(),
+  eligibility: text("eligibility").notNull(),
+  format: text("format").notNull(),
+  city: text("city").notNull(),
+  venue: text("venue").notNull(),
+  theme: text("theme").notNull(),
+  startsAt: text("starts_at").notNull(),
+  endsAt: text("ends_at").notNull(),
+  opensAt: text("opens_at").notNull(),
+  closesAt: text("closes_at").notNull(),
+  capacity: integer("capacity").notNull(),
+  teamMin: integer("team_min").notNull(),
+  teamMax: integer("team_max").notNull(),
+  image: integer("image").notNull().default(0),
+  source: text("source").notNull().default(""),
+  status: text("status").notNull().default("draft"),
+  createdAt: text("created_at").notNull(),
+});
+export const registrations = sqliteTable(
+  "registrations",
+  {
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id),
+    userId: text("user_id")
+      .notNull()
+      .references(() => profiles.id),
+    status: text("status").notNull().default("active"),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.eventId, t.userId] })],
+);
+export const teams = sqliteTable("teams", {
+  id: text("id").primaryKey(),
+  eventId: text("event_id")
+    .notNull()
+    .references(() => events.id),
+  leaderId: text("leader_id")
+    .notNull()
+    .references(() => profiles.id),
+  name: text("name").notNull(),
+  skills: text("skills").notNull(),
+  description: text("description").notNull().default(""),
+  status: text("status").notNull().default("forming"),
+});
+export const members = sqliteTable(
+  "team_members",
+  {
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id),
+    userId: text("user_id")
+      .notNull()
+      .references(() => profiles.id),
+  },
+  (t) => [
+    primaryKey({ columns: [t.teamId, t.userId] }),
+    uniqueIndex("one_team_per_event").on(t.eventId, t.userId),
+  ],
+);
+export const requests = sqliteTable("team_requests", {
+  id: text("id").primaryKey(),
+  teamId: text("team_id")
+    .notNull()
+    .references(() => teams.id),
+  userId: text("user_id")
+    .notNull()
+    .references(() => profiles.id),
+  kind: text("kind").notNull(),
+  status: text("status").notNull().default("pending"),
+  createdAt: text("created_at").notNull(),
+});
+export const notifications = sqliteTable("notifications", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => profiles.id),
+  message: text("message").notNull(),
+  read: integer("read").notNull().default(0),
+  createdAt: text("created_at").notNull(),
+});
+export const audits = sqliteTable("audit_logs", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id")
+    .notNull()
+    .references(() => organizations.id),
+  actorId: text("actor_id").notNull(),
+  action: text("action").notNull(),
+  targetId: text("target_id").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+export const matchingRuns = sqliteTable("matching_runs", {
+  id: text("id").primaryKey(),
+  eventId: text("event_id")
+    .notNull()
+    .references(() => events.id),
+  payload: text("payload").notNull(),
+  snapshot: text("snapshot").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+export const matchingApprovals = sqliteTable("matching_approvals", {
+  runId: text("run_id")
+    .primaryKey()
+    .references(() => matchingRuns.id),
+  actorId: text("actor_id").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+export const favorites = sqliteTable(
+  "favorites",
+  {
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id),
+    userId: text("user_id")
+      .notNull()
+      .references(() => profiles.id),
+  },
+  (t) => [primaryKey({ columns: [t.eventId, t.userId] })],
+);
+export const aiUsage = sqliteTable(
+  "ai_usage",
+  {
+    userId: text("user_id").notNull(),
+    day: text("day").notNull(),
+    count: integer("count").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.day] })],
+);
+
+export const operationChecks = sqliteTable(
+  "operation_checks",
+  { name: text("name").primaryKey(), valid: integer("valid").notNull() },
+  (t) => [check("atomic_guard", sql`${t.valid} = 1`)],
+);
+// Uploaded event covers ("cover:<eventId>") and profile photos ("avatar:<userId>"), base64-encoded.
+export const images = sqliteTable("images", {
+  id: text("id").primaryKey(),
+  mime: text("mime").notNull(),
+  data: text("data").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});

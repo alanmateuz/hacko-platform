@@ -1,7 +1,15 @@
-# Hacko — Fase 01
+# Hacko — v3
 
-Código completo desta fase em `hacko-phase01-source.zip`. Extraia antes de executar os comandos abaixo. O pacote corresponde ao commit de hospedagem `3420c7ff290b396cc6f5cf8600809a124d7b98c3`. O conector GitHub não disponibiliza este repositório; o checkpoint foi enviado pela interface web. A sincronização dos arquivos individuais ainda depende de habilitar o acesso do conector ao repositório.
+O código-fonte agora está versionado diretamente no repositório (base: `hacko-phase01-source.zip`, a versão funcional mais recente; `hacko-v02-source.zip` era a versão estática anterior e continua preservado). Execute `pnpm install`, `pnpm test`, `pnpm check` e `pnpm build`.
 
+## Novidades da v3
+
+- **Correção de inscrições/equipes.** O formulário de inscrição era exibido mesmo com o evento em rascunho ou antes da abertura, e o servidor respondia apenas "Inscrições fechadas.". Agora a página mostra o motivo (rascunho, abre em…, encerrada, lotada) e a API retorna mensagens específicas. Criar equipe sem inscrição mostra o caminho para se inscrever; o erro genérico de "regras atuais" foi substituído por verificações explícitas. Alertas de ação usam "Fechar" em vez de "Recarregar".
+- **Upload de capa do hackathon** (recorte 5:2, 1600×640) e **foto de perfil** (400×400). As imagens são redimensionadas/recomprimidas no navegador (metadados EXIF removidos), validadas por tipo e assinatura no servidor e guardadas na tabela D1 `images` (migração `0002`). Fotos de perfil só são servidas para perfis públicos ou para o próprio dono. Duplicar um evento copia a capa.
+- **Identidade visual.** Logotipo `hacko↗` (seta da marca no lugar do ✳), favicon `h↗`, padrão de setas lima ↗ / azul ↙ em hero, login e painéis escuros, opção de capa "Padrão Hacko", seleção e foco nas cores da marca.
+- **Revisão de código.** Código-fonte formatado (antes minificado em poucas linhas), contagem de inscritos disponível na página do evento, cancelamento sem inscrição ativa agora é rejeitado, novos testes para inscrição em rascunho, upload, validação de imagens e privacidade de avatar.
+
+## Fase 01 (histórico)
 
 Núcleo funcional baseado no PRD v1.0 e na identidade visual do [Figma](https://www.figma.com/design/YWBXllkKdflwpesUc2kthv).
 
