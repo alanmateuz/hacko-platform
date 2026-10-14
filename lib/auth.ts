@@ -155,7 +155,31 @@ export const enabledProviders = () =>
   (Object.keys(PROVIDERS) as Provider[]).filter((p) => vars[PROVIDERS[p].id] && vars[PROVIDERS[p].secret]);
 
 // GET /api/auth/<provider>: without ?code starts the flow, with ?code finishes it.
+// With ?popup=1 the flow runs in a popup window (account chooser), which then hands the
+// result back to the page that opened it and closes itself.
 export async function oauth(provider: Provider, request: Request) {
+  const url = new URL(request.url);
+  const finishing = url.searchParams.has("code") || url.searchParams.has("error");
+  const popup = finishing
+    ? (readCookie(request.headers.get("cookie"), STATE_COOKIE) || "").split("|")[2] === "1"
+    : url.searchParams.get("popup") === "1";
+  const res = await oauthFlow(provider, request, popup);
+  const to = res.headers.get("Location");
+  if (!popup || !to || !to.startsWith("/")) return res;
+  const headers = new Headers(res.headers);
+  headers.delete("Location");
+  headers.set("Content-Type", "text/html; charset=utf-8");
+  headers.set("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'");
+  const target = JSON.stringify(to).replace(/</g, "\\u003c");
+  return new Response(
+    `<!doctype html><meta charset="utf-8"><title>Hacko</title><script>` +
+      `var t=${target};try{if(window.opener&&!window.opener.closed){window.opener.postMessage({hacko:"login",to:t},location.origin);window.close()}}catch(e){}location.replace(t)` +
+      `</script>`,
+    { status: 200, headers },
+  );
+}
+
+async function oauthFlow(provider: Provider, request: Request, popup: boolean) {
   const p = PROVIDERS[provider];
   const clientId = vars[p.id],
     secret = vars[p.secret];
@@ -176,7 +200,9 @@ export async function oauth(provider: Provider, request: Request) {
       state,
       ...(provider === "google" ? { prompt: "select_account" } : {}),
     }).toString();
-    return redirect(auth.toString(), [cookie(STATE_COOKIE, state + "|" + returnTo, request, 600)]);
+    return redirect(auth.toString(), [
+      cookie(STATE_COOKIE, state + "|" + returnTo + (popup ? "|1" : ""), request, 600),
+    ]);
   }
   const [expected, returnTo] = (readCookie(request.headers.get("cookie"), STATE_COOKIE) || "").split("|");
   if (!expected || expected !== url.searchParams.get("state")) return loginError("sessao_expirada");
@@ -292,7 +318,8 @@ async function sessionResponse(userId: string, request: Request) {
 export async function signup(request: Request) {
   const c = await credentials(request);
   if (c instanceof Response) return c;
-  if (c.password.length < 8) return fail("A senha precisa ter pelo menos 8 caracteres.", 400);
+  const weak = passwordProblems(c.password);
+  if (weak.length) return fail("A senha precisa ter " + weak.join(", ") + ".", 400);
   if (await db().prepare("SELECT 1 FROM users WHERE email=?").bind(c.email).first())
     return fail("Este e-mail já tem conta. Entre com sua senha ou pelo Google, GitHub ou LinkedIn.", 409);
   const userId = crypto.randomUUID();
@@ -337,4 +364,13 @@ export async function login(request: Request) {
   }
   await db().prepare("DELETE FROM login_failures WHERE email=?").bind(c.email).run();
   return sessionResponse(user!.id, request);
+}
+
+// Regras mínimas da senha (mesmas exibidas no cadastro).
+export function passwordProblems(password: string) {
+  const missing: string[] = [];
+  if (password.length < 8) missing.push("pelo menos 8 caracteres");
+  if (!/[A-Z]/.test(password)) missing.push("uma letra maiúscula");
+  if (!/[0-9]/.test(password)) missing.push("um número");
+  return missing;
 }

@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { searchCatalog, normalize } from "../lib/domain.mjs";
 type Row = Record<string, any>;
 // Brand arrow (identidade visual Hacko): diagonal com ponta em "L".
@@ -237,9 +237,154 @@ const LOGIN_ERRORS: Record<string, string> = {
   provedor_indisponivel: "Essa forma de login ainda não está disponível.",
 };
 const PROVIDER_LABEL: Record<string, string> = { google: "Google", github: "GitHub", linkedin: "LinkedIn" };
+const PASSWORD_RULES: [string, (p: string) => boolean][] = [
+  ["Mínimo de 8 caracteres", (p) => p.length >= 8],
+  ["Uma letra maiúscula", (p) => /[A-Z]/.test(p)],
+  ["Um número", (p) => /[0-9]/.test(p)],
+];
+const passwordValid = (p: string) => PASSWORD_RULES.every(([, ok]) => ok(p));
+// 0 = fraca, 1 = mais ou menos, 2 = forte. Forte exige as regras + tamanho/variedade extra.
+function passwordStrength(p: string) {
+  if (!passwordValid(p)) return 0;
+  const extra = [p.length >= 12, /[a-z]/.test(p), /[^A-Za-z0-9]/.test(p)].filter(Boolean).length;
+  return extra >= 2 ? 2 : 1;
+}
+function EyeIcon({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      aria-hidden="true"
+    >
+      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
+      {!open && <path d="M4 4l16 16" />}
+    </svg>
+  );
+}
+function PasswordInput({
+  name,
+  autoComplete,
+  value,
+  onChange,
+}: {
+  name: string;
+  autoComplete: string;
+  value?: string;
+  onChange?: (v: string) => void;
+}) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <span className="password-input">
+      <input
+        name={name}
+        type={visible ? "text" : "password"}
+        required
+        autoComplete={autoComplete}
+        value={value}
+        onChange={onChange && ((e) => onChange(e.target.value))}
+      />
+      <button
+        type="button"
+        className="eye"
+        onClick={() => setVisible(!visible)}
+        aria-label={visible ? "Ocultar senha" : "Mostrar senha"}
+        aria-pressed={visible}
+      >
+        <EyeIcon open={!visible} />
+      </button>
+    </span>
+  );
+}
+function PasswordStrength({ password }: { password: string }) {
+  const level = passwordStrength(password);
+  const labels = ["Senha fraca", "Senha mais ou menos", "Senha forte"];
+  return (
+    <div className="password-meter" aria-live="polite">
+      <ul className="password-rules">
+        {PASSWORD_RULES.map(([label, ok]) => (
+          <li key={label} className={ok(password) ? "ok" : ""}>
+            <span aria-hidden="true">{ok(password) ? "✓" : "○"}</span> {label}
+          </li>
+        ))}
+      </ul>
+      {password && (
+        <>
+          <div className={"strength-bar level-" + level} aria-hidden="true">
+            <span />
+          </div>
+          <small className={"strength-label level-" + level}>{labels[level]}</small>
+        </>
+      )}
+    </div>
+  );
+}
+const PROVIDER_ICONS: Record<string, ReactNode> = {
+  google: (
+    <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+      <path
+        fill="#FFC107"
+        d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.2-.1-2.4-.4-3.5z"
+      />
+      <path
+        fill="#FF3D00"
+        d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"
+      />
+      <path
+        fill="#4CAF50"
+        d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"
+      />
+      <path
+        fill="#1976D2"
+        d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.2-.1-2.4-.4-3.5z"
+      />
+    </svg>
+  ),
+  github: (
+    <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
+    </svg>
+  ),
+  linkedin: (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+      <rect width="24" height="24" rx="4" fill="#0A66C2" />
+      <path
+        fill="#fff"
+        d="M7.1 9.5H4.7V19h2.4V9.5zM5.9 5.5a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8zM19.3 13.8c0-2.6-1.4-4.5-4-4.5-1.3 0-2.2.7-2.6 1.4V9.5h-2.3V19h2.4v-4.7c0-1.3.3-2.5 1.9-2.5 1.5 0 1.6 1.4 1.6 2.6V19h2.4l.6-5.2z"
+      />
+    </svg>
+  ),
+};
+// Google abre o seletor de contas em uma janela pop-up; GitHub e LinkedIn levam ao site do provedor.
+function startProviderLogin(p: string, returnTo: string) {
+  const url = `/api/auth/${p}?return_to=${encodeURIComponent(returnTo)}`;
+  if (p !== "google") return (location.href = url);
+  const w = 480,
+    h = 640;
+  const left = window.screenX + (window.outerWidth - w) / 2,
+    top = window.screenY + (window.outerHeight - h) / 2;
+  const popup = window.open(
+    url + "&popup=1",
+    "hacko-google",
+    `width=${w},height=${h},left=${left},top=${top}`,
+  );
+  if (!popup) return (location.href = url); // pop-up bloqueado: segue no mesmo separador
+  const onMessage = (e: MessageEvent) => {
+    if (e.origin !== location.origin || e.data?.hacko !== "login") return;
+    window.removeEventListener("message", onMessage);
+    location.href = e.data.to;
+    location.reload();
+  };
+  window.addEventListener("message", onMessage);
+}
 function LoginOptions({ providers }: { providers: string[] }) {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [state, setState] = useState<{ error?: string; busy?: boolean }>({});
+  const [password, setPassword] = useState("");
   const urlError = new URLSearchParams(location.hash.split("?")[1] || "").get("erro");
   const signup = mode === "signup";
   return (
@@ -255,6 +400,7 @@ function LoginOptions({ providers }: { providers: string[] }) {
             onClick={() => {
               setMode(m);
               setState({});
+              setPassword("");
             }}
           >
             {m === "login" ? "Entrar" : "Criar conta"}
@@ -271,6 +417,8 @@ function LoginOptions({ providers }: { providers: string[] }) {
         onSubmit={async (e) => {
           e.preventDefault();
           const f = Object.fromEntries(new FormData(e.currentTarget)) as Row;
+          if (signup && !passwordValid(f.password))
+            return setState({ error: "A senha não atende aos requisitos." });
           if (signup && f.password !== f.confirm) return setState({ error: "As senhas não conferem." });
           setState({ busy: true });
           const r = await fetch("/api/auth/" + mode, {
@@ -291,19 +439,18 @@ function LoginOptions({ providers }: { providers: string[] }) {
         </label>
         <label>
           Senha
-          <input
+          <PasswordInput
             name="password"
-            type="password"
-            required
-            minLength={signup ? 8 : undefined}
             autoComplete={signup ? "new-password" : "current-password"}
+            value={password}
+            onChange={setPassword}
           />
-          {signup && <small>Mínimo de 8 caracteres.</small>}
         </label>
+        {signup && <PasswordStrength password={password} />}
         {signup && (
           <label>
             Confirmar senha
-            <input name="confirm" type="password" required minLength={8} autoComplete="new-password" />
+            <PasswordInput name="confirm" autoComplete="new-password" />
           </label>
         )}
         {state.error && (
@@ -311,7 +458,7 @@ function LoginOptions({ providers }: { providers: string[] }) {
             {state.error}
           </small>
         )}
-        <button type="submit" disabled={state.busy}>
+        <button type="submit" disabled={state.busy || (signup && !passwordValid(password))}>
           {state.busy ? "Aguarde…" : signup ? "Criar conta" : "Entrar"}
         </button>
       </form>
@@ -320,15 +467,19 @@ function LoginOptions({ providers }: { providers: string[] }) {
           <div className="divider">
             <span>ou continue com</span>
           </div>
-          {providers.map((p) => (
-            <a
-              key={p}
-              className={"button full provider " + p}
-              href={`/api/auth/${p}?return_to=${encodeURIComponent("/#/profile")}`}
-            >
-              {PROVIDER_LABEL[p]}
-            </a>
-          ))}
+          <div className="provider-buttons">
+            {providers.map((p) => (
+              <button
+                key={p}
+                type="button"
+                className={"provider " + p}
+                onClick={() => startProviderLogin(p, "/#/profile")}
+              >
+                {PROVIDER_ICONS[p]}
+                <span>{PROVIDER_LABEL[p]}</span>
+              </button>
+            ))}
+          </div>
         </>
       )}
       <small>

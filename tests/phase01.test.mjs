@@ -339,24 +339,27 @@ test("auth: cadastro e login com senha, sessão, logout e proteções", async ()
   );
   assert.equal((await call("signup", { email: "nao-e-email", password: "12345678" })).status, 400);
   assert.equal((await call("signup", { email: "ana@example.test", password: "curta" })).status, 400);
-  const created = await call("signup", { email: "Ana@Example.test", password: "senha-forte-1" });
+  // regras da senha: 8+ caracteres, maiúscula e número
+  assert.match((await (await call("signup", { email: "ana@example.test", password: "semmaiuscula1" })).json()).error, /maiúscula/);
+  assert.match((await (await call("signup", { email: "ana@example.test", password: "SemNumeroAqui" })).json()).error, /número/);
+  const created = await call("signup", { email: "Ana@Example.test", password: "Senha-forte-1" });
   assert.equal(created.status, 200);
   assert.match(created.headers.get("set-cookie"), /hacko_session=[^;]+; Path=\/; HttpOnly; SameSite=Lax/);
   assert.equal(
     (await auth.userFromCookieHeader("hacko_session=" + sessionOf(created))).email,
     "ana@example.test",
   );
-  assert.equal((await call("signup", { email: "ana@example.test", password: "outra-senha" })).status, 409);
+  assert.equal((await call("signup", { email: "ana@example.test", password: "Outra-senha1" })).status, 409);
   // senha nunca é guardada em texto puro
   const stored = sql
     .prepare("SELECT password_hash FROM users WHERE email='ana@example.test'")
     .get().password_hash;
   assert.match(stored, /^pbkdf2\$100000\$/);
-  assert.ok(!stored.includes("senha-forte-1"));
+  assert.ok(!stored.includes("Senha-forte-1"));
 
   assert.equal((await call("login", { email: "ana@example.test", password: "errada" })).status, 401);
   assert.equal((await call("login", { email: "ninguem@example.test", password: "errada" })).status, 401);
-  const ok = await call("login", { email: " ANA@example.test ", password: "senha-forte-1" });
+  const ok = await call("login", { email: " ANA@example.test ", password: "Senha-forte-1" });
   assert.equal(ok.status, 200);
   const session = sessionOf(ok);
   assert.equal(await auth.userFromCookieHeader("hacko_session=forjado"), null);
@@ -370,8 +373,15 @@ test("auth: cadastro e login com senha, sessão, logout e proteções", async ()
 
   // limite de tentativas erradas
   for (let i = 0; i < 10; i++) await call("login", { email: "ana@example.test", password: "errada" });
-  assert.equal((await call("login", { email: "ana@example.test", password: "senha-forte-1" })).status, 429);
+  assert.equal((await call("login", { email: "ana@example.test", password: "Senha-forte-1" })).status, 429);
 
+  // pop-up do Google: erros e sucesso voltam para a janela que abriu o pop-up
+  const pop = await auth.oauth("google", new Request(origin + "/api/auth/google?popup=1"));
+  assert.equal(pop.status, 200);
+  assert.equal(pop.headers.get("location"), null);
+  const html = await pop.text();
+  assert.match(html, /postMessage\(\{hacko:"login",to:t\},location.origin\)/);
+  assert.match(html, /provedor_indisponivel/);
   // provedor sem chaves configuradas não inicia o fluxo
   const r = await auth.oauth("google", new Request(origin + "/api/auth/google"));
   assert.equal(r.headers.get("location"), "/#/login?erro=provedor_indisponivel");

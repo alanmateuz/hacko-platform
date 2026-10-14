@@ -1010,6 +1010,109 @@ footer .wordmark {
   gap: 16px;
 }
 .login-options input,
-.login-options .form button {
+.login-options .form button[type="submit"] {
   width: 100%;
+}
+
+.password-input {
+  position: relative;
+  display: block;
+}
+.password-input input {
+  padding-right: 48px;
+}
+.password-input .eye {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  box-shadow: none;
+}
+.password-input .eye:hover {
+  color: var(--ink);
+}
+.password-meter {
+  display: grid;
+  gap: 8px;
+  margin-top: -6px;
+}
+.password-rules {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.password-rules li.ok {
+  color: var(--ink);
+}
+.password-rules li.ok span {
+  color: #3a7d00;
+  font-weight: 700;
+}
+.strength-bar {
+  height: 6px;
+  border-radius: 99px;
+  background: var(--line);
+  overflow: hidden;
+}
+.strength-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transition:
+    width 0.25s,
+    background 0.25s;
+}
+.strength-bar.level-0 span {
+  width: 33%;
+  background: #e5484d;
+}
+.strength-bar.level-1 span {
+  width: 66%;
+  background: #f5c400;
+}
+.strength-bar.level-2 span {
+  width: 100%;
+  background: #d2f801;
+}
+.strength-label {
+  font-weight: 700;
+}
+.strength-label.level-0 {
+  color: #c4282d;
+}
+.strength-label.level-1 {
+  color: #8a6d00;
+}
+.strength-label.level-2 {
+  color: var(--ink);
+}
+.provider-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+}
+.provider-buttons button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--white);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+.provider-buttons button:hover {
+  border-color: var(--blue);
 }
