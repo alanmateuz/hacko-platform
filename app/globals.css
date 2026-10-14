@@ -987,3 +987,29 @@ footer .wordmark {
   flex: 1;
   border-top: 1px solid var(--line);
 }
+.auth-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 4px;
+}
+.auth-tabs button {
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  box-shadow: none;
+}
+.auth-tabs button.active {
+  background: var(--white);
+  color: var(--ink);
+}
+.login-options .form {
+  margin: 0;
+  width: 100%;
+  gap: 16px;
+}
+.login-options input,
+.login-options .form button {
+  width: 100%;
+}

@@ -318,58 +318,60 @@ test("v3: upload de capa e foto de perfil", async () => {
   assert.equal((await post({ op: "profile", data: { name: "x".repeat(50000) } })).status, 413);
 });
 
-test("auth: link por e-mail, sessão, logout e proteções", async () => {
-  const logs = [];
+test("auth: cadastro e login com senha, sessão, logout e proteções", async () => {
   const auth = compiled("../lib/auth.ts", {
     "cloudflare:workers": { env: { DB: db } },
   });
   const origin = "http://localhost:5173";
-  const send = (email, return_to = "/#/profile") =>
-    auth.sendEmailLink(
-      new Request(origin + "/api/auth/email", {
+  const call = (path, body, from = origin) =>
+    auth[path](
+      new Request(origin + "/api/auth/" + path, {
         method: "POST",
-        headers: { origin, "content-type": "application/json" },
-        body: JSON.stringify({ email, return_to }),
+        headers: { origin: from, "content-type": "application/json" },
+        body: JSON.stringify(body),
       }),
     );
-  const origLog = console.log;
-  console.log = (...a) => logs.push(a.join(" "));
-  try {
-    assert.equal((await send("nao-e-email")).status, 400);
-    const bad = await auth.sendEmailLink(
-      new Request(origin + "/api/auth/email", {
-        method: "POST",
-        headers: { origin: "https://evil.test" },
-        body: "{}",
-      }),
-    );
-    assert.equal(bad.status, 403);
-    assert.equal((await send("Ana@Example.test", "//evil.test")).status, 200);
-    assert.equal((await send("ana@example.test")).status, 429); // 1 link por minuto
-  } finally {
-    console.log = origLog;
-  }
-  const link = new URL(logs.at(-1).split(" ").at(-1));
-  assert.equal(link.searchParams.get("return_to"), "/"); // open redirect bloqueado
-  const ok = await auth.verifyEmailLink(new Request(link));
-  assert.equal(ok.status, 302);
-  assert.equal(ok.headers.get("location"), "/");
-  const setCookie = ok.headers.get("set-cookie");
-  assert.match(setCookie, /hacko_session=[^;]+; Path=\/; HttpOnly; SameSite=Lax/);
-  const session = setCookie.match(/hacko_session=([^;]+)/)[1];
-  const me = await auth.userFromCookieHeader("hacko_session=" + session);
-  assert.equal(me.email, "ana@example.test");
-  // o token do link é de uso único e não fica salvo em texto puro
-  assert.equal((await auth.verifyEmailLink(new Request(link))).headers.get("location"), "/#/login?erro=link_invalido");
-  assert.ok(!sql.prepare("SELECT 1 FROM sessions WHERE id=?").get(decodeURIComponent(session)));
-  assert.equal(await auth.userFromCookieHeader("hacko_session=forjado"), null);
-  // mesmo e-mail via outro provedor = mesma conta
+  const sessionOf = (r) => r.headers.get("set-cookie").match(/hacko_session=([^;]+)/)[1];
+
   assert.equal(
-    sql.prepare("SELECT count(*) n FROM users WHERE email='ana@example.test'").get().n,
-    1,
+    (await call("signup", { email: "x@y.test", password: "12345678" }, "https://evil.test")).status,
+    403,
   );
-  await auth.logout(new Request(origin + "/api/auth/logout", { method: "POST", headers: { cookie: "hacko_session=" + session } }));
+  assert.equal((await call("signup", { email: "nao-e-email", password: "12345678" })).status, 400);
+  assert.equal((await call("signup", { email: "ana@example.test", password: "curta" })).status, 400);
+  const created = await call("signup", { email: "Ana@Example.test", password: "senha-forte-1" });
+  assert.equal(created.status, 200);
+  assert.match(created.headers.get("set-cookie"), /hacko_session=[^;]+; Path=\/; HttpOnly; SameSite=Lax/);
+  assert.equal(
+    (await auth.userFromCookieHeader("hacko_session=" + sessionOf(created))).email,
+    "ana@example.test",
+  );
+  assert.equal((await call("signup", { email: "ana@example.test", password: "outra-senha" })).status, 409);
+  // senha nunca é guardada em texto puro
+  const stored = sql
+    .prepare("SELECT password_hash FROM users WHERE email='ana@example.test'")
+    .get().password_hash;
+  assert.match(stored, /^pbkdf2\$100000\$/);
+  assert.ok(!stored.includes("senha-forte-1"));
+
+  assert.equal((await call("login", { email: "ana@example.test", password: "errada" })).status, 401);
+  assert.equal((await call("login", { email: "ninguem@example.test", password: "errada" })).status, 401);
+  const ok = await call("login", { email: " ANA@example.test ", password: "senha-forte-1" });
+  assert.equal(ok.status, 200);
+  const session = sessionOf(ok);
+  assert.equal(await auth.userFromCookieHeader("hacko_session=forjado"), null);
+  await auth.logout(
+    new Request(origin + "/api/auth/logout", {
+      method: "POST",
+      headers: { cookie: "hacko_session=" + session },
+    }),
+  );
   assert.equal(await auth.userFromCookieHeader("hacko_session=" + session), null);
+
+  // limite de tentativas erradas
+  for (let i = 0; i < 10; i++) await call("login", { email: "ana@example.test", password: "errada" });
+  assert.equal((await call("login", { email: "ana@example.test", password: "senha-forte-1" })).status, 429);
+
   // provedor sem chaves configuradas não inicia o fluxo
   const r = await auth.oauth("google", new Request(origin + "/api/auth/google"));
   assert.equal(r.headers.get("location"), "/#/login?erro=provedor_indisponivel");

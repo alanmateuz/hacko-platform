@@ -4,7 +4,7 @@ O código-fonte agora está versionado diretamente no repositório (base: `hacko
 
 ## Login e publicação própria
 
-O login com ChatGPT (dependente da hospedagem Sites) foi substituído por login próprio: Google, GitHub, LinkedIn e link por e-mail, com sessões guardadas no D1 (migração `0003`). Para publicar em hacko.com.br na Cloudflare, siga [DEPLOY.md](DEPLOY.md).
+O login com ChatGPT (dependente da hospedagem Sites) foi substituído por login próprio: cadastro com e-mail e senha (como no Beecrowd), além de Google, GitHub e LinkedIn. O perfil é completado depois de entrar. Senhas guardadas com PBKDF2; sessões no D1 (migrações `0003`–`0005`). Para publicar em hacko.com.br na Cloudflare, siga [DEPLOY.md](DEPLOY.md).
 
 ## Novidades da v3
 
