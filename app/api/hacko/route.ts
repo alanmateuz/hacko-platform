@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
-import { getChatGPTUser } from "../../chatgpt-auth";
+import { getCurrentUser } from "../../session";
+import { enabledProviders } from "../../../lib/auth";
 import { eventSchema, organizationSchema, profileSchema, teamSchema } from "../../../lib/validation";
 import { suggestTeams, searchCatalog } from "../../../lib/domain.mjs";
 export const dynamic = "force-dynamic";
@@ -93,7 +94,7 @@ async function all(sql: string, ...v: any[]): Promise<any[]> {
   return (await stmt(sql, ...v).all()).results;
 }
 async function auth() {
-  const u = await getChatGPTUser();
+  const u = await getCurrentUser();
   if (!u) fail("Entre na sua conta para continuar.", 401);
   return u!;
 }
@@ -160,7 +161,7 @@ export async function GET(request: Request) {
       id = url.searchParams.get("id") || "";
     if (action === "image") {
       // Avatars are only public for opt-in visible profiles (or the owner themself).
-      const viewer = id.startsWith("avatar:") ? await getChatGPTUser() : null;
+      const viewer = id.startsWith("avatar:") ? await getCurrentUser() : null;
       const img = await one(
         "SELECT mime,data FROM images WHERE id=? AND (id NOT LIKE 'avatar:%' OR EXISTS(SELECT 1 FROM profiles WHERE 'avatar:'||id=images.id AND (visible=1 OR id=?)))",
         id,
@@ -179,7 +180,7 @@ export async function GET(request: Request) {
         },
       });
     }
-    const user = await getChatGPTUser();
+    const user = await getCurrentUser();
     if (action === "bootstrap") {
       const catalog = await all(
         `SELECT e.*,o.name organization,${counts} FROM events e JOIN organizations o ON o.id=e.org_id WHERE e.status='published' ORDER BY e.starts_at`,
@@ -208,6 +209,7 @@ export async function GET(request: Request) {
             )
           : [],
         aiEnabled: !!(env as any).OPENAI_API_KEY,
+        authProviders: enabledProviders(),
       });
     }
     if (action === "event") {

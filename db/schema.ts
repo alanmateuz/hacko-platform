@@ -172,3 +172,38 @@ export const images = sqliteTable("images", {
   data: text("data").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
+// Hacko accounts (replaces the ChatGPT-hosted identity). profiles.id === users.id.
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  name: text("name").notNull().default(""),
+  createdAt: text("created_at").notNull(),
+});
+// Linked sign-in methods: provider = google | github | linkedin | email.
+export const identities = sqliteTable(
+  "identities",
+  {
+    provider: text("provider").notNull(),
+    subject: text("subject").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+  },
+  (t) => [primaryKey({ columns: [t.provider, t.subject] })],
+);
+// Session and magic-link ids are SHA-256 hashes of the secret tokens.
+export const sessions = sqliteTable("sessions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+export const loginTokens = sqliteTable("login_tokens", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  usedAt: text("used_at"),
+  createdAt: text("created_at").notNull(),
+});

@@ -962,3 +962,28 @@ footer .wordmark {
 .dark .eyebrow::after {
   color: var(--lime);
 }
+.login-options {
+  display: grid;
+  gap: 12px;
+}
+.button.provider {
+  background: var(--white);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+.button.provider:hover {
+  border-color: var(--blue);
+}
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--line);
+}
