@@ -13,7 +13,9 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "test": "node --test tests/phase01.test.mjs",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "deploy": "node scripts/run-framework.mjs build && wrangler deploy --config dist/server/wrangler.json",
+    "db:migrate:prod": "wrangler d1 migrations apply hacko-db --remote --config dist/server/wrangler.json"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

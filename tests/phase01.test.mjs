@@ -64,6 +64,9 @@ function compiled(path, imports) {
     console,
     AbortSignal,
     atob,
+    btoa,
+    TextEncoder,
+    Headers,
     Uint8Array,
     fetch,
   });
@@ -72,7 +75,8 @@ function compiled(path, imports) {
 const validation = compiled("../lib/validation.ts", {});
 const api = compiled("../app/api/hacko/route.ts", {
   "cloudflare:workers": { env: { DB: db } },
-  "../../chatgpt-auth": { getChatGPTUser: async () => user },
+  "../../session": { getCurrentUser: async () => user },
+  "../../../lib/auth": { enabledProviders: () => ["google", "github", "linkedin"] },
   "../../../lib/validation": validation,
   "../../../lib/domain.mjs": domain,
 });
@@ -312,4 +316,62 @@ test("v3: upload de capa e foto de perfil", async () => {
   assert.equal((await post({ op: "image.upload", kind: "avatar", data: null })).status, 200);
   assert.equal((await image("avatar:alice")).status, 404);
   assert.equal((await post({ op: "profile", data: { name: "x".repeat(50000) } })).status, 413);
+});
+
+test("auth: link por e-mail, sessão, logout e proteções", async () => {
+  const logs = [];
+  const auth = compiled("../lib/auth.ts", {
+    "cloudflare:workers": { env: { DB: db } },
+  });
+  const origin = "http://localhost:5173";
+  const send = (email, return_to = "/#/profile") =>
+    auth.sendEmailLink(
+      new Request(origin + "/api/auth/email", {
+        method: "POST",
+        headers: { origin, "content-type": "application/json" },
+        body: JSON.stringify({ email, return_to }),
+      }),
+    );
+  const origLog = console.log;
+  console.log = (...a) => logs.push(a.join(" "));
+  try {
+    assert.equal((await send("nao-e-email")).status, 400);
+    const bad = await auth.sendEmailLink(
+      new Request(origin + "/api/auth/email", {
+        method: "POST",
+        headers: { origin: "https://evil.test" },
+        body: "{}",
+      }),
+    );
+    assert.equal(bad.status, 403);
+    assert.equal((await send("Ana@Example.test", "//evil.test")).status, 200);
+    assert.equal((await send("ana@example.test")).status, 429); // 1 link por minuto
+  } finally {
+    console.log = origLog;
+  }
+  const link = new URL(logs.at(-1).split(" ").at(-1));
+  assert.equal(link.searchParams.get("return_to"), "/"); // open redirect bloqueado
+  const ok = await auth.verifyEmailLink(new Request(link));
+  assert.equal(ok.status, 302);
+  assert.equal(ok.headers.get("location"), "/");
+  const setCookie = ok.headers.get("set-cookie");
+  assert.match(setCookie, /hacko_session=[^;]+; Path=\/; HttpOnly; SameSite=Lax/);
+  const session = setCookie.match(/hacko_session=([^;]+)/)[1];
+  const me = await auth.userFromCookieHeader("hacko_session=" + session);
+  assert.equal(me.email, "ana@example.test");
+  // o token do link é de uso único e não fica salvo em texto puro
+  assert.equal((await auth.verifyEmailLink(new Request(link))).headers.get("location"), "/#/login?erro=link_invalido");
+  assert.ok(!sql.prepare("SELECT 1 FROM sessions WHERE id=?").get(decodeURIComponent(session)));
+  assert.equal(await auth.userFromCookieHeader("hacko_session=forjado"), null);
+  // mesmo e-mail via outro provedor = mesma conta
+  assert.equal(
+    sql.prepare("SELECT count(*) n FROM users WHERE email='ana@example.test'").get().n,
+    1,
+  );
+  await auth.logout(new Request(origin + "/api/auth/logout", { method: "POST", headers: { cookie: "hacko_session=" + session } }));
+  assert.equal(await auth.userFromCookieHeader("hacko_session=" + session), null);
+  // provedor sem chaves configuradas não inicia o fluxo
+  const r = await auth.oauth("google", new Request(origin + "/api/auth/google"));
+  assert.equal(r.headers.get("location"), "/#/login?erro=provedor_indisponivel");
+  assert.deepEqual([...auth.enabledProviders()], []);
 });

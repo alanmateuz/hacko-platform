@@ -2,6 +2,10 @@
 
 O código-fonte agora está versionado diretamente no repositório (base: `hacko-phase01-source.zip`, a versão funcional mais recente; `hacko-v02-source.zip` era a versão estática anterior e continua preservado). Execute `pnpm install`, `pnpm test`, `pnpm check` e `pnpm build`.
 
+## Login e publicação própria
+
+O login com ChatGPT (dependente da hospedagem Sites) foi substituído por login próprio: Google, GitHub, LinkedIn e link por e-mail, com sessões guardadas no D1 (migração `0003`). Para publicar em hacko.com.br na Cloudflare, siga [DEPLOY.md](DEPLOY.md).
+
 ## Novidades da v3
 
 - **Correção de inscrições/equipes.** O formulário de inscrição era exibido mesmo com o evento em rascunho ou antes da abertura, e o servidor respondia apenas "Inscrições fechadas.". Agora a página mostra o motivo (rascunho, abre em…, encerrada, lotada) e a API retorna mensagens específicas. Criar equipe sem inscrição mostra o caminho para se inscrever; o erro genérico de "regras atuais" foi substituído por verificações explícitas. Alertas de ação usam "Fechar" em vez de "Recarregar".

@@ -15,14 +15,25 @@ const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 const managedLinux = readExecutionProfile() === "managed-linux";
 
 const localBindingConfig = {
+  // Domínio próprio: HACKO_DOMAIN=hacko.com.br liga o Worker ao domínio e ao www.
+  ...(process.env.HACKO_DOMAIN
+    ? {
+        routes: [
+          { pattern: process.env.HACKO_DOMAIN, custom_domain: true },
+          { pattern: "www." + process.env.HACKO_DOMAIN, custom_domain: true },
+        ],
+      }
+    : {}),
   main: "./build/sites-worker.ts",
   compatibility_flags: ["nodejs_compat"],
   d1_databases: d1
     ? [
         {
           binding: d1,
-          database_name: "site-creator-d1",
-          database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
+          // Production (Cloudflare próprio): defina HACKO_D1_ID no build/deploy.
+          database_name: process.env.HACKO_D1_ID ? "hacko-db" : "site-creator-d1",
+          database_id: process.env.HACKO_D1_ID || SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
+          migrations_dir: "../../drizzle", // relativo a dist/server/wrangler.json
         },
       ]
     : [],

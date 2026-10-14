@@ -229,6 +229,84 @@ function windowState(e: Row) {
   if (e.participants != null && e.participants >= e.capacity) return "full";
   return "open";
 }
+const LOGIN_ERRORS: Record<string, string> = {
+  cancelado: "Login cancelado.",
+  sessao_expirada: "A tentativa de login expirou. Tente novamente.",
+  falha_login: "Não foi possível entrar agora. Tente novamente.",
+  email_nao_verificado: "Sua conta não tem um e-mail verificado. Use outra forma de login.",
+  link_invalido: "Link de acesso inválido ou expirado. Peça um novo.",
+  provedor_indisponivel: "Essa forma de login ainda não está disponível.",
+};
+const PROVIDER_LABEL: Record<string, string> = { google: "Google", github: "GitHub", linkedin: "LinkedIn" };
+function LoginOptions({ providers }: { providers: string[] }) {
+  const [email, setEmail] = useState("");
+  const [state, setState] = useState<{ sent?: boolean; error?: string; busy?: boolean }>({});
+  const urlError = new URLSearchParams(location.hash.split("?")[1] || "").get("erro");
+  const returnTo = "/#/profile";
+  return (
+    <div className="login-options">
+      {urlError && (
+        <p className="alert" role="alert">
+          {LOGIN_ERRORS[urlError] || "Não foi possível entrar."}
+        </p>
+      )}
+      {providers.map((p) => (
+        <a
+          key={p}
+          className={"button full provider " + p}
+          href={`/api/auth/${p}?return_to=${encodeURIComponent(returnTo)}`}
+        >
+          Continuar com {PROVIDER_LABEL[p]}
+        </a>
+      ))}
+      <div className="divider">
+        <span>{providers.length ? "ou receba um link por e-mail" : "Entre com seu e-mail"}</span>
+      </div>
+      {state.sent ? (
+        <p className="notice" role="status">
+          Enviamos um link de acesso para <b>{email}</b>. Ele vale por 15 minutos.
+        </p>
+      ) : (
+        <form
+          className="form wide"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setState({ busy: true });
+            const r = await fetch("/api/auth/email", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email, return_to: returnTo }),
+            });
+            const d = (await r.json().catch(() => ({}))) as Row;
+            setState(r.ok ? { sent: true } : { error: d.error || "Não foi possível enviar." });
+          }}
+        >
+          <label>
+            E-mail
+            <input
+              type="email"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </label>
+          {state.error && (
+            <small role="alert" className="error-text">
+              {state.error}
+            </small>
+          )}
+          <button type="submit" className="secondary" disabled={state.busy}>
+            {state.busy ? "Enviando…" : "Enviar link de acesso"}
+          </button>
+        </form>
+      )}
+      <small>
+        Sem senha: você entra pela sua conta Google, GitHub, LinkedIn ou por um link enviado ao seu e-mail.
+      </small>
+    </div>
+  );
+}
 function Card({ e }: any) {
   const closed = e.closes_at <= new Date().toISOString();
   return (
@@ -348,7 +426,7 @@ export default function Hacko() {
   }, [route]);
   useEffect(() => {
     const onHash = () => {
-      setRoute(location.hash.slice(1) || "/");
+      setRoute(location.hash.slice(1).split("?")[0] || "/");
       setData({});
       setQuery("");
       setMessage("");
@@ -449,23 +527,19 @@ export default function Hacko() {
                     Sou organização
                   </a>
                 </div>
-                <a href="/signout-with-chatgpt?return_to=%2F" target="_top">
+                <button
+                  className="ghost"
+                  onClick={async () => {
+                    await fetch("/api/auth/logout", { method: "POST" });
+                    location.href = "/";
+                  }}
+                >
                   Sair
-                </a>
+                </button>
               </>
             ) : (
               <>
-                <a
-                  className="button full"
-                  href="/signin-with-chatgpt?return_to=%2F%23%2Fprofile"
-                  target="_top"
-                >
-                  Entrar ou cadastrar com ChatGPT
-                </a>
-                <p className="notice">
-                  Acesso seguro para participantes e empresas. Recuperação de acesso é feita pelo provedor da
-                  sua conta ChatGPT.
-                </p>
+                <LoginOptions providers={boot.authProviders || []} />
               </>
             )}
           </section>
