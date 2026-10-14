@@ -1,58 +1,51 @@
-# Hacko · v0.2
+# Hacko — Fase 01
 
-Primeira implementação responsiva do design system Hacko: descoberta de hackathons, detalhes, comunidade, equipes, perfil e fluxo de acesso.
+Código completo desta fase em `hacko-phase01-source.zip`. Extraia antes de executar os comandos abaixo. O pacote corresponde ao commit de hospedagem `3420c7ff290b396cc6f5cf8600809a124d7b98c3`. O conector GitHub não disponibiliza este repositório; o checkpoint foi enviado pela interface web. A sincronização dos arquivos individuais ainda depende de habilitar o acesso do conector ao repositório.
 
-## Executar
 
-Requer Node.js 18+ para os testes e Python 3 para o servidor de desenvolvimento.
+Núcleo funcional baseado no PRD v1.0 e na identidade visual do [Figma](https://www.figma.com/design/YWBXllkKdflwpesUc2kthv).
 
-```sh
-npm test
-npm run check
-npm start
-```
+## Executar e verificar
 
-Abra http://localhost:8080. Não há dependências de build. `dist/` contém o aplicativo modular em HTML, CSS e JavaScript, pronto para hospedagem estática. As rotas usam fragmentos (#/) para funcionar sem regras no servidor.
+Node >=22.13, pnpm 11.25.0. Instale com `pnpm install`, execute `pnpm test`, `pnpm check` e `pnpm build`. O ambiente de desenvolvimento segue os scripts de Sites/Vinext. Nunca injete identidade de teste em produção.
 
-## Design
+O frontend React usa rotas por hash e a API `/api/hacko`. O servidor usa Vinext/Cloudflare Workers, com banco D1. A plataforma fornece a identidade autenticada. `.openai/hosting.json` declara o banco; as migrações em `drizzle/` são aplicadas pela publicação Sites.
 
-Figma: https://www.figma.com/design/YWBXllkKdflwpesUc2kthv
-Página: 04 · Hacko v0.2 — Descoberta e comunidade.
-Home 26:2; detalhe 26:114; perfil 27:85; radar 27:162; comunidade 27:239; login 31:247; mobile 32:310.
+## O que funciona
 
-Tokens: azul #0367FC, ação #0057D9 para contraste de texto, lima #D2F801, carvão #161616, branco #FFFFFF. Space Grotesk e Manrope são substitutas provisórias de Clash Display e Gilroy. CSS responsivo, foco visível, navegação por teclado, labels, mensagens aria-live e respeito a movimento reduzido.
+- Acesso com ChatGPT; perfil de participante, visibilidade opt-in e links informados.
+- Uma conta pode participar e administrar suas próprias organizações. A autorização é verificada no servidor, por organização e objeto.
+- Eventos: rascunho, edição, publicação explícita, duplicação e arquivamento; regras, datas, vagas e limites de equipe.
+- Catálogo pesquisável por nome/tema, cidade, modalidade e intervalo de datas.
+- Inscrição com declaração de elegibilidade e aceite do regulamento; cancelamento até o início, após sair da equipe.
+- Equipes: criação, busca, solicitações, convites entre inscritos, aceite/recusa, saída e dissolução pelo líder. Confirmação pelo organizador exige tamanho válido.
+- Painel com inscrições, vagas, participantes sem equipe e histórico de ações.
+- TeamMatch determinístico: preserva equipes existentes, agrupa por disponibilidade declarada e complementa competências. Propostas versionadas, revisão e aprovação explícita; mudanças invalidam propostas anteriores.
+- Notificações internas e favoritos persistidos no servidor.
+- Radar com OpenAI: interpretação de filtros do catálogo ou busca externa na web, com citações, fontes e data da consulta. Máximo de 20 buscas/dia por usuário; sem publicação automática.
 
-## Escopo e limites
+## Configuração de IA
 
-- Filtros combinados por busca, região e categoria; detalhes próprios para três eventos.
-- Favoritos, perfil, grupos e equipe persistidos no localStorage, apenas neste navegador.
-- Login/cadastro/recuperação são demonstrações sinalizadas. Senhas não são armazenadas nem enviadas; use dados fictícios.
-- Radar não chama IA nem busca na web: filtra o catálogo de exemplo.
-- Não existe backend, banco de dados, autorização entre usuários, convite real ou envio de e-mail. Antes de produção: autenticação e regras de acesso no servidor, catálogo verificado, moderação, validação no servidor e integrações de notificações.
-- Eventos, datas, locais, prêmios e contagens fictícios. Mapa ilustrativo.
-- Testes automatizados verificam filtros, escaping e integridade das rotas. Revisão visual em navegador não realizada neste ambiente.
+`OPENAI_API_KEY` deve existir somente como segredo do ambiente. Arquivos `.env*` estão ignorados pelo Git. A chave jamais é enviada ao frontend. O radar usa Responses API com `store:false`, limite de saída e timeout. A busca web pode ter cobrança própria e seus resultados precisam ser conferidos nas fontes oficiais. Falhas e falta de créditos são apresentadas ao usuário.
 
-## Fotos
+## Integridade e testes
 
-Fotos ilustrativas sob licença Unsplash (https://unsplash.com/license), não domínio público:
+`tests/phase01.test.mjs` executa o handler real da API com identidade simulada e adaptador D1 sobre SQLite em memória. Verifica autenticação, CSRF, isolamento de organizações, rascunhos ocultos, privacidade de e-mail/perfil, capacidade, inscrição idempotente, uma equipe por evento, tamanho mínimo/máximo, permissões do líder, cancelamento e rollback. Testa TeamMatch com 20/100/300 participantes, dados ausentes e limites diferentes, sem duplicidades ou omissões.
 
-1. George Dagerotip — https://unsplash.com/photos/gQxpuAU6mLU
-2. Jj Englert — https://unsplash.com/photos/H2pfrqhQou8
-3. Creatopy — https://unsplash.com/photos/M35xxKGb_tA
+Restrições de inscrição e equipe também são impostas por índices únicos e verificações SQL dentro do mesmo batch transacional. A migração inicial foi corrigida após falhar antes da publicação; os guards SQL substituem triggers não aceitos pelo executor da hospedagem. Chamadas múltiplas usam batch transacional. Dados de teste não são inseridos em produção.
 
-Fontes carregadas do Google Fonts com fallback local sans-serif.
+## Limites desta fase
 
-## Organização
+- Login e recuperação usam a conta ChatGPT, sem senha própria da Hacko. A hospedagem permanece privada, conforme o acesso existente; convites de teste para outras pessoas exigem configurar acesso ao site.
+- A conta proprietária administra a organização. Delegação a outros administradores, plataforma admin, LGPD/exportação/exclusão, moderação e e-mails transacionais ainda não estão implementados.
+- TeamMatch permite revisar e aprovar, mas não editar individualmente a composição dentro da proposta. Para ajustes, use as equipes manuais e gere uma proposta nova.
+- O radar é executado por consulta, sem rastreamento agendado, importação automática ou garantia de inscrições abertas.
+- O copiloto de regulamento/agenda (P1), pagamentos, jurados e recrutamento ficam fora desta fase.
+- Os três eventos fictícios da versão estática não são convertidos em registros reais. O catálogo começa vazio até uma organização publicar eventos.
+- Não houve QA visual em navegador nesta execução: o ambiente não oferece o plugin control-browser exigido pelo fluxo de Sites. Build e testes de API não substituem teste com usuários reais.
 
-- dist/index.html: documento e acessibilidade inicial.
-- dist/styles.css: tokens, componentes e breakpoints.
-- dist/data.js: catálogo, filtros e escaping.
-- dist/app.js: rotas, componentes e interações.
-- tests/data.test.js: testes de comportamento e proteção de conteúdo.
+## Identidade e créditos
 
-## Próximos marcos
+Azul #0367FC, azul de ação #0057D9, lima #D2F801 e carvão #161616. Space Grotesk e Manrope continuam substitutas provisórias de Clash Display e Gilroy. Layout responsivo, foco visível, rótulos de campos e estados de erro/carregamento.
 
-1. Backend com autenticação real e dados por usuário.
-2. Gestão de hackathons e equipes para organizadores.
-3. Coleta verificável de oportunidades, deduplicação, origem e data de atualização.
-4. QA de navegador e dispositivos, auditoria de acessibilidade e testes de integração.
+Fotos ilustrativas com licença Unsplash (não domínio público): George Dagerotip https://unsplash.com/photos/gQxpuAU6mLU; Jj Englert https://unsplash.com/photos/H2pfrqhQou8; Creatopy https://unsplash.com/photos/M35xxKGb_tA.
