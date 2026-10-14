@@ -483,9 +483,21 @@ function LoginOptions({ providers }: { providers: string[] }) {
         </>
       )}
       <small>
-        {signup
-          ? "Depois de criar a conta, você completa seu perfil."
-          : "Ainda não tem conta? Clique em “Criar conta”."}
+        {signup ? (
+          <>
+            Ao criar a conta, você concorda com os{" "}
+            <a href="/termos" target="_blank">
+              Termos de uso
+            </a>{" "}
+            e a{" "}
+            <a href="/privacidade" target="_blank">
+              Política de Privacidade
+            </a>
+            . Depois, é só completar seu perfil.
+          </>
+        ) : (
+          "Ainda não tem conta? Clique em “Criar conta”."
+        )}
       </small>
     </div>
   );
@@ -1677,7 +1689,10 @@ export default function Hacko() {
             <Logo arrow="var(--blue)" /> · Ideias grandes, conexões reais.
           </span>
           <a href="#/org">Para organizações</a>
-          <span>Fotos ilustrativas · Unsplash</span>
+          <span>
+            <a href="/privacidade">Privacidade</a> · <a href="/termos">Termos de uso</a> · Fotos ilustrativas
+            · Unsplash
+          </span>
         </footer>
       </main>
       <nav className="bottom" aria-label="Atalhos mobile">
