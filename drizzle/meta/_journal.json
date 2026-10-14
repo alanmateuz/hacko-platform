@@ -29,6 +29,20 @@
       "when": 1792001608191,
       "tag": "0003_magenta_ghost_rider",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792011397757,
+      "tag": "0004_crazy_trish_tilby",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792011404752,
+      "tag": "0005_violet_luminals",
+      "breakpoints": true
     }
   ]
 }

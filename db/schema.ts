@@ -177,6 +177,10 @@ export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   email: text("email").notNull().unique(),
   name: text("name").notNull().default(""),
+  // pbkdf2$<iterações>$<salt>$<hash>; nulo para contas só com Google/GitHub/LinkedIn.
+  passwordHash: text("password_hash"),
+  // 1 quando o e-mail foi confirmado por um provedor OAuth.
+  emailVerified: integer("email_verified").notNull().default(0),
   createdAt: text("created_at").notNull(),
 });
 // Linked sign-in methods: provider = google | github | linkedin | email.
@@ -200,10 +204,9 @@ export const sessions = sqliteTable("sessions", {
   expiresAt: text("expires_at").notNull(),
   createdAt: text("created_at").notNull(),
 });
-export const loginTokens = sqliteTable("login_tokens", {
-  id: text("id").primaryKey(),
+// Tentativas de login com senha que falharam (limite por e-mail).
+export const loginFailures = sqliteTable("login_failures", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
   email: text("email").notNull(),
-  expiresAt: text("expires_at").notNull(),
-  usedAt: text("used_at"),
   createdAt: text("created_at").notNull(),
 });

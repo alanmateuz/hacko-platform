@@ -8,7 +8,7 @@ export type Provider = "google" | "github" | "linkedin";
 const SESSION_COOKIE = "hacko_session";
 const STATE_COOKIE = "hacko_oauth";
 const SESSION_DAYS = 30;
-const LINK_MINUTES = 15;
+const PBKDF2_ITERATIONS = 100_000; // limite máximo do Web Crypto nos Workers
 
 const vars = env as unknown as Record<string, string | undefined>;
 function db(): D1Database {
@@ -91,6 +91,8 @@ export async function logout(request: Request) {
 }
 
 // Finds the account for a provider identity, linking by verified e-mail, or creates it.
+// Contas criadas com senha não têm e-mail verificado: se o dono real do e-mail entrar por um provedor,
+// a senha anterior e as sessões abertas são invalidadas (impede sequestro de conta por pré-cadastro).
 async function upsertUser(provider: string, subject: string, email: string, name: string) {
   email = email.trim().toLowerCase();
   const linked = await db()
@@ -99,16 +101,21 @@ async function upsertUser(provider: string, subject: string, email: string, name
     .first<{ user_id: string }>();
   if (linked) return linked.user_id;
   const existing = await db()
-    .prepare("SELECT id FROM users WHERE email=?")
+    .prepare("SELECT id,email_verified FROM users WHERE email=?")
     .bind(email)
-    .first<{ id: string }>();
+    .first<{ id: string; email_verified: number }>();
   const userId = existing?.id || crypto.randomUUID();
   await db().batch([
     ...(existing
-      ? []
+      ? existing.email_verified
+        ? []
+        : [
+            db().prepare("UPDATE users SET password_hash=NULL,email_verified=1 WHERE id=?").bind(userId),
+            db().prepare("DELETE FROM sessions WHERE user_id=?").bind(userId),
+          ]
       : [
           db()
-            .prepare("INSERT INTO users(id,email,name,created_at) VALUES(?,?,?,?)")
+            .prepare("INSERT INTO users(id,email,name,email_verified,created_at) VALUES(?,?,?,1,?)")
             .bind(userId, email, name.slice(0, 160), now()),
         ]),
     db()
@@ -228,74 +235,106 @@ export async function oauth(provider: Provider, request: Request) {
   }
 }
 
-// POST /api/auth/email {email, return_to}: sends a one-time sign-in link.
-export async function sendEmailLink(request: Request) {
-  const json = (data: object, status = 200) =>
-    Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
-  if (request.headers.get("origin") !== new URL(request.url).origin)
-    return json({ error: "Origem inválida." }, 403);
+// ===== Cadastro e login com e-mail e senha =====
+const b64 = (b: Uint8Array) => btoa(String.fromCharCode(...b));
+const unb64 = (s: string): Uint8Array<ArrayBuffer> => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+async function pbkdf2(password: string, salt: Uint8Array<ArrayBuffer>, iterations: number) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, [
+    "deriveBits",
+  ]);
+  return new Uint8Array(
+    await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, key, 256),
+  );
+}
+export async function hashPassword(password: string) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  return `pbkdf2$${PBKDF2_ITERATIONS}$${b64(salt)}$${b64(await pbkdf2(password, salt, PBKDF2_ITERATIONS))}`;
+}
+export async function verifyPassword(password: string, stored: string | null) {
+  const [alg, iter, salt, hash] = (stored || "").split("$");
+  // Mesmo custo quando a conta não existe, para não revelar pelo tempo quais e-mails estão cadastrados.
+  const actual = await pbkdf2(
+    password,
+    salt ? unb64(salt) : new Uint8Array(16),
+    Math.min(Number(iter) || PBKDF2_ITERATIONS, PBKDF2_ITERATIONS),
+  );
+  if (alg !== "pbkdf2" || !hash) return false;
+  const expected = unb64(hash);
+  let diff = expected.length ^ actual.length;
+  for (let i = 0; i < expected.length; i++) diff |= expected[i] ^ actual[i];
+  return diff === 0;
+}
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MAX_FAILURES = 10,
+  FAILURE_WINDOW_MS = 15 * 60000;
+const fail = (error: string, status: number) =>
+  Response.json({ error }, { status, headers: { "Cache-Control": "no-store" } });
+
+async function credentials(request: Request) {
+  if (request.headers.get("origin") !== new URL(request.url).origin) return fail("Origem inválida.", 403);
   const body: any = await request.json().catch(() => ({}));
   const email = String(body.email || "")
     .trim()
     .toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254)
-    return json({ error: "Informe um e-mail válido." }, 400);
-  const recent = await db()
-    .prepare("SELECT count(*) n, max(created_at) last FROM login_tokens WHERE email=? AND created_at>?")
-    .bind(email, new Date(Date.now() - 3600000).toISOString())
-    .first<{ n: number; last: string | null }>();
-  if (recent && (recent.n >= 5 || (recent.last && Date.now() - Date.parse(recent.last) < 60000)))
-    return json({ error: "Aguarde um pouco antes de pedir outro link." }, 429);
-  const token = randomToken();
-  const link =
-    new URL(request.url).origin +
-    "/api/auth/email?token=" +
-    token +
-    "&return_to=" +
-    encodeURIComponent(safeReturn(body.return_to));
-  await db().batch([
-    db()
-      .prepare("DELETE FROM login_tokens WHERE created_at<=?")
-      .bind(new Date(Date.now() - 86400000).toISOString()),
-    db()
-      .prepare("INSERT INTO login_tokens(id,email,expires_at,created_at) VALUES(?,?,?,?)")
-      .bind(await sha256(token), email, new Date(Date.now() + LINK_MINUTES * 60000).toISOString(), now()),
-  ]);
-  if (!vars.RESEND_API_KEY) {
-    if (new URL(request.url).hostname !== "localhost" && new URL(request.url).hostname !== "127.0.0.1")
-      return json({ error: "Login por e-mail ainda não está configurado." }, 503);
-    console.log("[dev] link de login para", email, link);
-    return json({ ok: true, dev: true });
-  }
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: "Bearer " + vars.RESEND_API_KEY, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      from: vars.AUTH_FROM_EMAIL || "Hacko <login@hacko.com.br>",
-      to: email,
-      subject: "Seu link de acesso à Hacko",
-      text: `Use este link para entrar na Hacko (válido por ${LINK_MINUTES} minutos):\n\n${link}\n\nSe você não pediu este acesso, ignore este e-mail.`,
-      html: `<p>Use o botão abaixo para entrar na <b>hacko↗</b>. O link vale por ${LINK_MINUTES} minutos.</p><p><a href="${link}" style="background:#0367FC;color:#fff;padding:12px 20px;border-radius:10px;text-decoration:none;display:inline-block">Entrar na Hacko</a></p><p style="color:#626975;font-size:13px">Se você não pediu este acesso, ignore este e-mail.</p>`,
-    }),
-  });
-  if (!res.ok) {
-    console.error("Resend error", res.status);
-    return json({ error: "Não foi possível enviar o e-mail agora." }, 502);
-  }
-  return json({ ok: true });
+  const password = String(body.password || "");
+  if (!EMAIL_RE.test(email) || email.length > 254) return fail("Informe um e-mail válido.", 400);
+  if (!password || password.length > 200) return fail("Informe sua senha.", 400);
+  return { email, password };
+}
+async function sessionResponse(userId: string, request: Request) {
+  const r = await startSession(userId, request, "/");
+  const headers = new Headers({ "Content-Type": "application/json", "Cache-Control": "no-store" });
+  for (const c of r.headers.getSetCookie()) headers.append("Set-Cookie", c);
+  return new Response(JSON.stringify({ ok: true }), { headers });
 }
 
-// GET /api/auth/email?token=...: consumes the link (single use) and signs in.
-export async function verifyEmailLink(request: Request) {
-  const url = new URL(request.url);
-  const id = await sha256(url.searchParams.get("token") || "");
-  const row = await db()
-    .prepare(
-      "UPDATE login_tokens SET used_at=? WHERE id=? AND used_at IS NULL AND expires_at>? RETURNING email",
-    )
-    .bind(now(), id, now())
-    .first<{ email: string }>();
-  if (!row) return loginError("link_invalido");
-  const userId = await upsertUser("email", row.email, row.email, row.email.split("@")[0]);
-  return startSession(userId, request, safeReturn(url.searchParams.get("return_to")));
+// POST /api/auth/signup {email, password}
+export async function signup(request: Request) {
+  const c = await credentials(request);
+  if (c instanceof Response) return c;
+  if (c.password.length < 8) return fail("A senha precisa ter pelo menos 8 caracteres.", 400);
+  if (await db().prepare("SELECT 1 FROM users WHERE email=?").bind(c.email).first())
+    return fail("Este e-mail já tem conta. Entre com sua senha ou pelo Google, GitHub ou LinkedIn.", 409);
+  const userId = crypto.randomUUID();
+  try {
+    await db()
+      .prepare("INSERT INTO users(id,email,name,password_hash,email_verified,created_at) VALUES(?,?,?,?,0,?)")
+      .bind(userId, c.email, c.email.split("@")[0], await hashPassword(c.password), now())
+      .run();
+  } catch (e) {
+    if (String((e as Error)?.message).includes("UNIQUE")) return fail("Este e-mail já tem conta.", 409);
+    throw e;
+  }
+  return sessionResponse(userId, request);
+}
+
+// POST /api/auth/login {email, password}
+export async function login(request: Request) {
+  const c = await credentials(request);
+  if (c instanceof Response) return c;
+  const since = new Date(Date.now() - FAILURE_WINDOW_MS).toISOString();
+  const failures = await db()
+    .prepare("SELECT count(*) n FROM login_failures WHERE email=? AND created_at>?")
+    .bind(c.email, since)
+    .first<{ n: number }>();
+  if ((failures?.n || 0) >= MAX_FAILURES)
+    return fail("Muitas tentativas. Aguarde 15 minutos e tente novamente.", 429);
+  const user = await db()
+    .prepare("SELECT id,password_hash FROM users WHERE email=?")
+    .bind(c.email)
+    .first<{ id: string; password_hash: string | null }>();
+  if (!(await verifyPassword(c.password, user?.password_hash || null))) {
+    await db().batch([
+      db().prepare("DELETE FROM login_failures WHERE created_at<=?").bind(since),
+      db().prepare("INSERT INTO login_failures(email,created_at) VALUES(?,?)").bind(c.email, now()),
+    ]);
+    return fail(
+      user && !user.password_hash
+        ? "Esta conta entra pelo Google, GitHub ou LinkedIn."
+        : "E-mail ou senha incorretos.",
+      401,
+    );
+  }
+  await db().prepare("DELETE FROM login_failures WHERE email=?").bind(c.email).run();
+  return sessionResponse(user!.id, request);
 }

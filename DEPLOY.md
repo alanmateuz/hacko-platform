@@ -1,7 +1,7 @@
 # Publicar a Hacko em hacko.com.br (Cloudflare)
 
-A Hacko roda como Cloudflare Worker com banco D1. O login é próprio: Google, GitHub, LinkedIn e link por e-mail.
-Cada botão de login só aparece quando as chaves daquele provedor estão configuradas.
+A Hacko roda como Cloudflare Worker com banco D1. O login é próprio: cadastro com e-mail e senha (sempre disponível) e, opcionalmente, Google, GitHub e LinkedIn.
+Cada botão de provedor só aparece quando as chaves daquele provedor estão configuradas.
 
 ## 1. Chaves dos provedores de login
 
@@ -13,10 +13,6 @@ Para testar localmente, adicione também `http://localhost:5173/api/auth/<proved
 | Google | console.cloud.google.com → APIs e serviços → Tela de consentimento OAuth (Externo) → Credenciais → ID do cliente OAuth → Aplicativo da Web | `https://hacko.com.br/api/auth/google` | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` |
 | GitHub | github.com/settings/developers → OAuth Apps → New OAuth App (Homepage: `https://hacko.com.br`) | `https://hacko.com.br/api/auth/github` | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` |
 | LinkedIn | linkedin.com/developers/apps → Create app (exige uma Página da empresa no LinkedIn) → aba Products: **Sign In with LinkedIn using OpenID Connect** → aba Auth | `https://hacko.com.br/api/auth/linkedin` | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` |
-| E-mail | resend.com → Domains → adicionar `hacko.com.br` (os registros DNS podem ser criados automaticamente na Cloudflare) → API Keys | — | `RESEND_API_KEY` |
-
-O domínio hoje tem um registro SPF `v=spf1 -all` e DMARC `p=reject`, que bloqueiam todo envio de e-mail.
-Ao verificar o domínio no Resend, troque o SPF pelo que o Resend indicar e mantenha o DMARC.
 
 ## 2. Primeira publicação
 
@@ -41,7 +37,6 @@ npx wrangler secret put GITHUB_CLIENT_ID --name hacko-platform
 npx wrangler secret put GITHUB_CLIENT_SECRET --name hacko-platform
 npx wrangler secret put LINKEDIN_CLIENT_ID --name hacko-platform
 npx wrangler secret put LINKEDIN_CLIENT_SECRET --name hacko-platform
-npx wrangler secret put RESEND_API_KEY --name hacko-platform
 npx wrangler secret put OPENAI_API_KEY --name hacko-platform   # opcional, para o Radar
 ```
 
@@ -53,5 +48,5 @@ O domínio `hacko.com.br` precisa estar **Active** na Cloudflare; o deploy cria 
 
 ## Desenvolvimento local
 
-`pnpm dev`. Sem `RESEND_API_KEY`, o link de login por e-mail é impresso no terminal do servidor (só em localhost).
+`pnpm dev`.
 Chaves locais vão em `.dev.vars` (ignorado pelo Git).
