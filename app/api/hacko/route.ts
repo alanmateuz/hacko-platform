@@ -187,6 +187,17 @@ export async function GET(request: Request) {
         },
       });
     }
+    if (action === "featured") {
+      // Public: active published hackathons shown on the landing page carousel.
+      const events = await all(
+        `SELECT e.id,e.title,e.format,e.city,e.starts_at,e.ends_at,e.opens_at,e.closes_at,e.image,o.name organization,${counts} FROM events e JOIN organizations o ON o.id=e.org_id WHERE e.status='published' AND e.ends_at>? ORDER BY e.starts_at LIMIT 12`,
+        now(),
+      );
+      return Response.json(
+        { events },
+        { headers: { "Cache-Control": "public, max-age=60", "X-Content-Type-Options": "nosniff" } },
+      );
+    }
     const user = await getCurrentUser();
     if (action === "bootstrap") {
       const catalog = await all(
