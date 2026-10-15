@@ -1008,6 +1008,309 @@ function PeopleOverview({ data }: { data: Row }) {
     </>
   );
 }
+const DELIVERY: Record<string, [string, string]> = {
+  none: ["Não entregue", "muted"],
+  submitted: ["Entregue", "blue"],
+  reviewing: ["Em avaliação", "yellow"],
+  evaluated: ["Avaliada", "lime"],
+  pending: ["Pendente", "red"],
+};
+function DeliveryBadge({ value }: { value?: string }) {
+  const [label, tone] = DELIVERY[value || "none"] || DELIVERY.none;
+  return <span className={"delivery " + tone}>{label}</span>;
+}
+// Controle da organização para mudar o status de entrega de uma equipe.
+function ReviewControl({ team, onSave, busy }: { team: Row; onSave: (body: Row) => void; busy: boolean }) {
+  const [next, setNext] = useState(team.submission_status === "none" ? "pending" : "reviewing");
+  const [note, setNote] = useState(team.review_note || "");
+  return (
+    <div className="review-control">
+      <select
+        value={next}
+        onChange={(e) => setNext(e.target.value)}
+        aria-label={"Novo status de " + team.name}
+      >
+        {team.submission_status !== "none" && <option value="reviewing">Em avaliação</option>}
+        {team.submission_status !== "none" && <option value="evaluated">Avaliada</option>}
+        <option value="pending">Pendente (pedir ajustes)</option>
+      </select>
+      <input
+        value={note}
+        maxLength={1000}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder="Comentário para a equipe (opcional)"
+        aria-label={"Comentário para " + team.name}
+      />
+      <button
+        type="button"
+        className="secondary"
+        disabled={busy}
+        onClick={() => onSave({ op: "team.review", id: team.id, status: next, note })}
+      >
+        Salvar
+      </button>
+    </div>
+  );
+}
+// Planilha única do evento: aba de participantes e aba de equipes com acompanhamento de entrega.
+function EventSheet({
+  data,
+  busy,
+  onAction,
+  confirmButton,
+}: {
+  data: Row;
+  busy: boolean;
+  onAction: (body: Row) => void;
+  confirmButton: (t: Row) => ReactNode;
+}) {
+  // A aba escolhida sobrevive ao recarregamento dos dados depois de salvar uma avaliação.
+  const [tab, setTabState] = useState<"participants" | "teams">(() => {
+    try {
+      return sessionStorage.getItem("hacko-sheet-tab") === "teams" ? "teams" : "participants";
+    } catch {
+      return "participants";
+    }
+  });
+  const setTab = (v: "participants" | "teams") => {
+    setTabState(v);
+    try {
+      sessionStorage.setItem("hacko-sheet-tab", v);
+    } catch {}
+  };
+  const regs: Row[] = data.registrations || [];
+  const teams: Row[] = data.teams || [];
+  const teamName = (id: string) => teams.find((t) => t.id === id)?.name;
+  const delivered = teams.filter((t) => t.submission_status && t.submission_status !== "none").length;
+  return (
+    <section className="panel sheet">
+      <div className="sheet-head">
+        <h2>Planilha do evento</h2>
+        <div className="auth-tabs sheet-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "participants"}
+            className={tab === "participants" ? "active" : ""}
+            onClick={() => setTab("participants")}
+          >
+            Participantes ({regs.length})
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "teams"}
+            className={tab === "teams" ? "active" : ""}
+            onClick={() => setTab("teams")}
+          >
+            Equipes ({teams.length})
+          </button>
+        </div>
+      </div>
+      {tab === "participants" ? (
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                {["Nome", "E-mail", "Stack", "Cidade", "Disponibilidade", "Inscrição", "Equipe", "Links"].map(
+                  (x) => (
+                    <th key={x}>{x}</th>
+                  ),
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {regs.map((r) => (
+                <tr key={r.user_id}>
+                  <td>{r.name}</td>
+                  <td>
+                    <a href={"mailto:" + r.email}>{r.email}</a>
+                  </td>
+                  <td>{r.skills}</td>
+                  <td>{r.city}</td>
+                  <td>{r.availability || "Não informada"}</td>
+                  <td>{status(r.status)}</td>
+                  <td>{teamName(r.team_id) || "Sem equipe"}</td>
+                  <td>
+                    {r.linkedin && (
+                      <a href={r.linkedin} target="_blank" rel="noreferrer">
+                        LinkedIn ↗
+                      </a>
+                    )}{" "}
+                    {r.github && (
+                      <a href={r.github} target="_blank" rel="noreferrer">
+                        GitHub ↗
+                      </a>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {!regs.length && (
+                <tr>
+                  <td colSpan={8}>Nenhum inscrito ainda.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <>
+          <p className="sheet-summary">
+            {delivered} de {teams.length} equipes entregaram · Prazo de entrega:{" "}
+            {date(data.event.submission_deadline || data.event.ends_at)}
+          </p>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  {["Equipe", "Integrantes", "Situação", "Entrega", "Projeto", "Enviado em", "Avaliação"].map(
+                    (x) => (
+                      <th key={x}>{x}</th>
+                    ),
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {teams.map((t) => (
+                  <tr key={t.id}>
+                    <td>
+                      <b>{t.name}</b>
+                    </td>
+                    <td>
+                      <ul className="sheet-members">
+                        {regs
+                          .filter((r) => r.team_id === t.id)
+                          .sort(
+                            (a, b) =>
+                              (b.user_id === t.leader_id ? 1 : 0) - (a.user_id === t.leader_id ? 1 : 0),
+                          )
+                          .map((r) => (
+                            <li key={r.user_id}>
+                              {r.name}
+                              {r.user_id === t.leader_id && <span className="pill">Líder</span>}
+                              <br />
+                              <a href={"mailto:" + r.email}>{r.email}</a>
+                            </li>
+                          ))}
+                      </ul>
+                    </td>
+                    <td>
+                      {status(t.status)} · {t.members}/{data.event.team_max}
+                      {t.status === "forming" && <div>{confirmButton(t)}</div>}
+                    </td>
+                    <td>
+                      <DeliveryBadge value={t.submission_status} />
+                    </td>
+                    <td>
+                      {t.submission_url ? (
+                        <>
+                          <a href={t.submission_url} target="_blank" rel="noreferrer">
+                            Abrir projeto ↗
+                          </a>
+                          {t.submission_note && <small className="sheet-note">{t.submission_note}</small>}
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td>{t.submitted_at ? date(t.submitted_at) : "—"}</td>
+                    <td>
+                      <ReviewControl key={t.submission_status} team={t} onSave={onAction} busy={busy} />
+                      {t.review_note && (
+                        <small className="sheet-note">Último comentário: {t.review_note}</small>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {!teams.length && (
+                  <tr>
+                    <td colSpan={7}>Nenhuma equipe formada ainda.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+// Entrega do projeto na página da equipe: o líder envia o link; todos veem o status e o comentário.
+function TeamDelivery({
+  team,
+  event,
+  leader,
+  busy,
+  onSubmit,
+}: {
+  team: Row;
+  event: Row;
+  leader: boolean;
+  busy: boolean;
+  onSubmit: (body: Row) => void;
+}) {
+  const nowIso = new Date().toISOString();
+  const deadline = event.submission_deadline || event.ends_at;
+  const open = nowIso >= event.starts_at && nowIso <= deadline && team.submission_status !== "evaluated";
+  return (
+    <section className="panel section">
+      <div className="section-head">
+        <h2>Entrega do projeto</h2>
+        <DeliveryBadge value={team.submission_status} />
+      </div>
+      <p>
+        Prazo: <b>{date(deadline)}</b>
+        {team.submitted_at && <> · Enviado em {date(team.submitted_at)}</>}
+      </p>
+      {team.submission_url && (
+        <p>
+          <a href={team.submission_url} target="_blank" rel="noreferrer">
+            {team.submission_url} ↗
+          </a>
+          {team.submission_note && (
+            <>
+              <br />
+              <small>{team.submission_note}</small>
+            </>
+          )}
+        </p>
+      )}
+      {team.review_note && <p className="notice">Comentário da organização: {team.review_note}</p>}
+      {leader && open ? (
+        <form
+          className="form wide"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const f = Object.fromEntries(new FormData(e.currentTarget)) as Row;
+            onSubmit({ op: "team.submit", id: team.id, url: f.url, note: f.note });
+          }}
+        >
+          <label>
+            Link do projeto (GitHub, vídeo, Figma, site…)
+            <input name="url" type="url" required pattern="https://.*" defaultValue={team.submission_url} />
+          </label>
+          <label>
+            Descrição curta (opcional)
+            <textarea name="note" maxLength={1000} defaultValue={team.submission_note} />
+          </label>
+          <button type="submit" disabled={busy}>
+            {team.submission_url ? "Atualizar entrega" : "Enviar entrega"}
+          </button>
+        </form>
+      ) : (
+        <small>
+          {nowIso < event.starts_at
+            ? "As entregas abrem no início do evento."
+            : nowIso > deadline
+              ? "O prazo de entrega terminou."
+              : team.submission_status === "evaluated"
+                ? "A entrega já foi avaliada."
+                : "Apenas o líder da equipe envia a entrega."}
+        </small>
+      )}
+    </section>
+  );
+}
 function Card({ e }: any) {
   const closed = e.closes_at <= new Date().toISOString();
   return (
@@ -1927,6 +2230,15 @@ export default function Hacko() {
               <div className="tags">{tags(t.skills)}</div>
             </div>
           </div>
+          {member && data.event && (
+            <TeamDelivery
+              team={t}
+              event={data.event}
+              leader={leader}
+              busy={busy}
+              onSubmit={(b: Row) => mutate(b)}
+            />
+          )}
           <div className="two-col">
             <section className="panel">
               <h2>Integrantes</h2>
@@ -2178,47 +2490,14 @@ export default function Hacko() {
               <h2>{data.registrations.filter((r: Row) => r.status === "active" && !r.team_id).length}</h2>
             </div>
           </div>
-          <section className="panel">
-            <h2>Participantes</h2>
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    {["Nome", "E-mail", "Stack", "Disponibilidade", "Inscrição", "Equipe"].map((x) => (
-                      <th key={x}>{x}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.registrations.map((r: Row) => (
-                    <tr key={r.user_id}>
-                      <td>{r.name}</td>
-                      <td>{r.email}</td>
-                      <td>{r.skills}</td>
-                      <td>{r.availability || "Não informada"}</td>
-                      <td>{status(r.status)}</td>
-                      <td>{data.teams.find((t: Row) => t.id === r.team_id)?.name || "Sem equipe"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-          <div className="section-head">
-            <h2>Equipes</h2>
-          </div>
-          <div className="grid">
-            {data.teams.map((t: Row) => (
-              <section className="panel" key={t.id}>
-                <h3>{t.name}</h3>
-                <p>
-                  {t.members} integrantes · {status(t.status)}
-                </p>
-                {t.status === "forming" &&
-                  button("Confirmar equipe", { op: "team.confirm", id: t.id }, "Confirmar esta equipe?")}
-              </section>
-            ))}
-          </div>
+          <EventSheet
+            data={data}
+            busy={busy}
+            onAction={(b: Row) => mutate(b)}
+            confirmButton={(t: Row) =>
+              button("Confirmar equipe", { op: "team.confirm", id: t.id }, "Confirmar esta equipe?")
+            }
+          />
           <section className="panel section">
             <span className="eyebrow">TEAMMATCH</span>
             <h2>Formação assistida, com revisão humana.</h2>
@@ -2495,6 +2774,7 @@ function EventForm({ event = {}, save, busy }: any) {
       onSubmit={(v: Row) => {
         for (const k of ["starts_at", "ends_at", "opens_at", "closes_at"])
           v[k] = new Date(v[k]).toISOString();
+        v.submission_deadline = v.submission_deadline ? new Date(v.submission_deadline).toISOString() : "";
         for (const k of ["capacity", "team_min", "team_max", "image"]) v[k] = Number(v[k]);
         save(v, cover.current);
       }}
@@ -2556,6 +2836,13 @@ function EventForm({ event = {}, save, busy }: any) {
             required
           />
         ))}
+        <Field
+          name="submission_deadline"
+          label="Prazo de entrega dos projetos (opcional)"
+          type="datetime-local"
+          value={local(event.submission_deadline)}
+          help="Se ficar vazio, vale o fim do evento."
+        />
         <Field name="capacity" label="Vagas" type="number" value={event.capacity || 100} required />
         <Field name="team_min" label="Mínimo por equipe" type="number" value={event.team_min || 2} required />
         <Field name="team_max" label="Máximo por equipe" type="number" value={event.team_max || 5} required />

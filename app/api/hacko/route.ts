@@ -256,6 +256,10 @@ export async function GET(request: Request) {
       await visibleEvent(t.event_id, u.userId);
       const member = await one("SELECT 1 FROM team_members WHERE team_id=? AND user_id=?", id, u.userId);
       return json({
+        event: await one(
+          "SELECT id,title,starts_at,ends_at,submission_deadline FROM events WHERE id=?",
+          t.event_id,
+        ),
         team: t,
         members: await all(
           `SELECT p.id,p.name,p.skills,(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v FROM team_members m JOIN profiles p ON p.id=m.user_id WHERE m.team_id=? AND (p.visible=1 OR ?=1)`,
@@ -300,7 +304,7 @@ export async function GET(request: Request) {
           u.userId,
         ),
         teams: await all(
-          `SELECT t.id,t.name,t.status,t.skills,t.description,t.event_id,e.title event_title,e.team_min,e.team_max,l.name leader_name,(SELECT count(*) FROM team_members m WHERE m.team_id=t.id) members,(SELECT group_concat(p.name,', ') FROM team_members m JOIN profiles p ON p.id=m.user_id WHERE m.team_id=t.id) member_names FROM teams t JOIN events e ON e.id=t.event_id LEFT JOIN profiles l ON l.id=t.leader_id WHERE t.event_id IN (${own}) ORDER BY e.starts_at DESC,t.name`,
+          `SELECT t.id,t.name,t.status,t.skills,t.description,t.event_id,t.submission_status,t.submission_url,t.submitted_at,e.title event_title,e.team_min,e.team_max,l.name leader_name,(SELECT count(*) FROM team_members m WHERE m.team_id=t.id) members,(SELECT group_concat(p.name,', ') FROM team_members m JOIN profiles p ON p.id=m.user_id WHERE m.team_id=t.id) member_names FROM teams t JOIN events e ON e.id=t.event_id LEFT JOIN profiles l ON l.id=t.leader_id WHERE t.event_id IN (${own}) ORDER BY e.starts_at DESC,t.name`,
           u.userId,
         ),
       });
@@ -321,11 +325,11 @@ export async function GET(request: Request) {
       return json({
         event: { ...e, cover_v: cover?.updated_at || null },
         registrations: await all(
-          "SELECT r.*,p.name,p.email,p.skills,p.availability,m.team_id FROM registrations r JOIN profiles p ON p.id=r.user_id LEFT JOIN team_members m ON m.user_id=r.user_id AND m.event_id=r.event_id WHERE r.event_id=?",
+          "SELECT r.*,p.name,p.email,p.skills,p.availability,p.city,p.linkedin,p.github,m.team_id FROM registrations r JOIN profiles p ON p.id=r.user_id LEFT JOIN team_members m ON m.user_id=r.user_id AND m.event_id=r.event_id WHERE r.event_id=?",
           id,
         ),
         teams: await all(
-          "SELECT t.*,(SELECT count(*) FROM team_members m WHERE m.team_id=t.id) members FROM teams t WHERE t.event_id=?",
+          "SELECT t.*,l.name leader_name,(SELECT count(*) FROM team_members m WHERE m.team_id=t.id) members FROM teams t LEFT JOIN profiles l ON l.id=t.leader_id WHERE t.event_id=? ORDER BY t.name",
           id,
         ),
         runs: await all(
@@ -364,7 +368,7 @@ export async function POST(request: Request) {
       (op === "register" ||
         op === "cancel" ||
         op === "profile" ||
-        (op.startsWith("team.") && op !== "team.confirm") ||
+        (op.startsWith("team.") && op !== "team.confirm" && op !== "team.review") ||
         (op === "image.upload" && body.kind === "avatar"))
     )
       fail(
@@ -709,6 +713,71 @@ export async function POST(request: Request) {
         notify(u.userId, "Equipe " + d.name + " criada."),
       ]);
       return json({ id: tid });
+    }
+    // Entrega do projeto: o líder envia; a organização acompanha e avalia.
+    if (op === "team.submit" || op === "team.review") {
+      const t = await one("SELECT * FROM teams WHERE id=?", id);
+      if (!t) fail("Equipe não encontrada.", 404);
+      const e = await visibleEvent(t.event_id, u.userId);
+      const members = await all("SELECT user_id FROM team_members WHERE team_id=?", id);
+      const note = String(body.note || "")
+        .trim()
+        .slice(0, 1000);
+      if (op === "team.submit") {
+        if (t.leader_id !== u.userId) fail("Apenas o líder envia a entrega da equipe.", 403);
+        const deadline = e.submission_deadline || e.ends_at;
+        if (now() < e.starts_at) fail("As entregas abrem no início do evento.", 409);
+        if (now() > deadline) fail("O prazo de entrega terminou.", 409);
+        if (t.submission_status === "evaluated") fail("Esta entrega já foi avaliada.", 409);
+        const link = String(body.url || "").trim();
+        if (!/^https:\/\/[^\s]+$/.test(link) || link.length > 500)
+          fail("Informe um link https válido do projeto.");
+        await db().batch([
+          stmt(
+            "UPDATE teams SET submission_status='submitted',submission_url=?,submission_note=?,submitted_at=? WHERE id=?",
+            link,
+            note,
+            now(),
+            id,
+          ),
+          notify(
+            (await one("SELECT owner_id FROM organizations WHERE id=?", e.org_id)).owner_id,
+            `A equipe ${t.name} enviou a entrega em ${e.title}.`,
+          ),
+          ...members
+            .filter((m: any) => m.user_id !== u.userId)
+            .map((m: any) => notify(m.user_id, `A entrega da equipe ${t.name} foi enviada.`)),
+        ]);
+        return json({ ok: true });
+      }
+      await ownEvent(t.event_id, u.userId);
+      const labels: Record<string, string> = {
+        reviewing: "está em avaliação",
+        evaluated: "foi avaliada",
+        pending: "precisa de ajustes",
+      };
+      const next = String(body.status || "");
+      if (!labels[next]) fail("Status de entrega inválido.");
+      if (t.submission_status === "none" && next !== "pending")
+        fail("A equipe ainda não enviou a entrega.", 409);
+      await db().batch([
+        stmt(
+          "UPDATE teams SET submission_status=?,review_note=?,reviewed_at=? WHERE id=?",
+          next,
+          note,
+          now(),
+          id,
+        ),
+        audit(e.org_id, u.userId, "team.review." + next, id),
+        ...members.map((m: any) =>
+          notify(
+            m.user_id,
+            `A entrega da equipe ${t.name} ${labels[next]} em ${e.title}.` +
+              (note ? ` Comentário: ${note}` : ""),
+          ),
+        ),
+      ]);
+      return json({ ok: true });
     }
     if (op.startsWith("team.")) {
       const t = await one("SELECT * FROM teams WHERE id=?", id);

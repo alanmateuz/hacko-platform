@@ -46,6 +46,8 @@ export const events = sqliteTable("events", {
   endsAt: text("ends_at").notNull(),
   opensAt: text("opens_at").notNull(),
   closesAt: text("closes_at").notNull(),
+  // Prazo de entrega dos projetos; vazio = fim do evento.
+  submissionDeadline: text("submission_deadline").notNull().default(""),
   capacity: integer("capacity").notNull(),
   teamMin: integer("team_min").notNull(),
   teamMax: integer("team_max").notNull(),
@@ -80,6 +82,13 @@ export const teams = sqliteTable("teams", {
   skills: text("skills").notNull(),
   description: text("description").notNull().default(""),
   status: text("status").notNull().default("forming"),
+  // Entrega do projeto: none | submitted | reviewing | evaluated | pending.
+  submissionStatus: text("submission_status").notNull().default("none"),
+  submissionUrl: text("submission_url").notNull().default(""),
+  submissionNote: text("submission_note").notNull().default(""),
+  submittedAt: text("submitted_at"),
+  reviewNote: text("review_note").notNull().default(""),
+  reviewedAt: text("reviewed_at"),
 });
 export const members = sqliteTable(
   "team_members",
