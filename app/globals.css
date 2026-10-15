@@ -1135,3 +1135,25 @@ footer .wordmark {
   color: var(--muted);
   font-size: 13px;
 }
+
+.link-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--action);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: none;
+}
+.danger-zone {
+  border-color: #f3c2c2;
+}
+button.danger {
+  background: #c4282d;
+  color: #fff;
+  border-color: #c4282d;
+}
+button.danger:disabled {
+  opacity: 0.5;
+}

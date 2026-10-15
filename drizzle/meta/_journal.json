@@ -43,6 +43,13 @@
       "when": 1792011404752,
       "tag": "0005_violet_luminals",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792032451705,
+      "tag": "0006_confused_mojo",
+      "breakpoints": true
     }
   ]
 }

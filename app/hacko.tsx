@@ -381,12 +381,170 @@ function startProviderLogin(p: string, returnTo: string) {
   };
   window.addEventListener("message", onMessage);
 }
-function LoginOptions({ providers }: { providers: string[] }) {
+async function postJson(path: string, body: Row) {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const d = (await r.json().catch(() => ({}))) as Row;
+  if (!r.ok) throw Error(d.error || "Não foi possível continuar.");
+  return d;
+}
+function ForgotPassword({ onBack }: { onBack: () => void }) {
+  const [state, setState] = useState<{ sent?: boolean; error?: string; busy?: boolean }>({});
+  return state.sent ? (
+    <div className="login-options">
+      <p className="notice" role="status">
+        Se houver uma conta com esse e-mail, enviamos um link para criar uma nova senha. Ele vale por 30
+        minutos. Confira também a caixa de spam.
+      </p>
+      <button type="button" className="ghost" onClick={onBack}>
+        ← Voltar para o login
+      </button>
+    </div>
+  ) : (
+    <form
+      className="form wide login-options"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setState({ busy: true });
+        try {
+          await postJson("/api/auth/forgot", { email: new FormData(e.currentTarget).get("email") });
+          setState({ sent: true });
+        } catch (err: any) {
+          setState({ error: err.message });
+        }
+      }}
+    >
+      <p>Informe o e-mail da sua conta. Vamos enviar um link para você criar uma nova senha.</p>
+      <label>
+        E-mail
+        <input name="email" type="email" required autoComplete="email" />
+      </label>
+      {state.error && (
+        <small role="alert" className="error-text">
+          {state.error}
+        </small>
+      )}
+      <button type="submit" disabled={state.busy}>
+        {state.busy ? "Enviando…" : "Enviar link"}
+      </button>
+      <button type="button" className="ghost" onClick={onBack}>
+        ← Voltar para o login
+      </button>
+    </form>
+  );
+}
+function ResetPassword() {
+  const token = new URLSearchParams(location.hash.split("?")[1] || "").get("token") || "";
+  const [password, setPassword] = useState("");
+  const [state, setState] = useState<{ error?: string; busy?: boolean }>({});
+  if (!token)
+    return (
+      <p className="alert" role="alert">
+        Link inválido. <a href="#/login">Peça um novo na tela de login.</a>
+      </p>
+    );
+  return (
+    <form
+      className="form wide login-options"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const f = Object.fromEntries(new FormData(e.currentTarget)) as Row;
+        if (!passwordValid(password)) return setState({ error: "A senha não atende aos requisitos." });
+        if (password !== f.confirm) return setState({ error: "As senhas não conferem." });
+        setState({ busy: true });
+        try {
+          await postJson("/api/auth/reset", { token, password });
+          location.hash = "/profile";
+          location.reload();
+        } catch (err: any) {
+          setState({ error: err.message });
+        }
+      }}
+    >
+      <label>
+        Nova senha
+        <PasswordInput name="password" autoComplete="new-password" value={password} onChange={setPassword} />
+      </label>
+      <PasswordStrength password={password} />
+      <label>
+        Confirmar nova senha
+        <PasswordInput name="confirm" autoComplete="new-password" />
+      </label>
+      {state.error && (
+        <small role="alert" className="error-text">
+          {state.error}
+        </small>
+      )}
+      <button type="submit" disabled={state.busy || !passwordValid(password)}>
+        {state.busy ? "Salvando…" : "Salvar nova senha"}
+      </button>
+      <small>Por segurança, você será desconectado de todos os outros dispositivos.</small>
+    </form>
+  );
+}
+function DeleteAccount() {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [state, setState] = useState<{ error?: string; busy?: boolean }>({});
+  return (
+    <section className="panel danger-zone">
+      <h3>Excluir conta</h3>
+      <p>
+        Apaga seu perfil, foto, inscrições, equipes, favoritos, notificações e as organizações sem outros
+        participantes. Não dá para desfazer.
+      </p>
+      {!open ? (
+        <button type="button" className="danger" onClick={() => setOpen(true)}>
+          Excluir minha conta
+        </button>
+      ) : (
+        <form
+          className="form wide"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setState({ busy: true });
+            try {
+              await postJson("/api/hacko", { op: "account.delete", confirm: text });
+              location.hash = "/";
+              location.reload();
+            } catch (err: any) {
+              setState({ error: err.message });
+            }
+          }}
+        >
+          <label>
+            Para confirmar, digite EXCLUIR
+            <input value={text} onChange={(e) => setText(e.target.value)} autoComplete="off" />
+          </label>
+          {state.error && (
+            <small role="alert" className="error-text">
+              {state.error}
+            </small>
+          )}
+          <div className="actions">
+            <button type="submit" className="danger" disabled={state.busy || text !== "EXCLUIR"}>
+              {state.busy ? "Excluindo…" : "Excluir definitivamente"}
+            </button>
+            <button type="button" className="ghost" onClick={() => setOpen(false)}>
+              Cancelar
+            </button>
+          </div>
+        </form>
+      )}
+    </section>
+  );
+}
+function LoginOptions({ providers, passwordReset }: { providers: string[]; passwordReset: boolean }) {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [state, setState] = useState<{ error?: string; busy?: boolean }>({});
   const [password, setPassword] = useState("");
+  const [forgot, setForgot] = useState(false);
   const urlError = new URLSearchParams(location.hash.split("?")[1] || "").get("erro");
   const signup = mode === "signup";
+  if (forgot) return <ForgotPassword onBack={() => setForgot(false)} />;
   return (
     <div className="login-options">
       <div className="auth-tabs" role="tablist">
@@ -496,7 +654,17 @@ function LoginOptions({ providers }: { providers: string[] }) {
             . Depois, é só completar seu perfil.
           </>
         ) : (
-          "Ainda não tem conta? Clique em “Criar conta”."
+          <>
+            Ainda não tem conta? Clique em “Criar conta”.
+            {passwordReset && (
+              <>
+                {" "}
+                <button type="button" className="link-button" onClick={() => setForgot(true)}>
+                  Esqueci minha senha
+                </button>
+              </>
+            )}
+          </>
         )}
       </small>
     </div>
@@ -693,6 +861,14 @@ export default function Hacko() {
   function content() {
     if (!boot) return null;
     const p = boot.profile || { ...blankProfile, name: boot.user?.name || "" };
+    if (page === "redefinir")
+      return (
+        <section className="panel small-width">
+          <span className="eyebrow">NOVA SENHA</span>
+          <h1>Crie uma nova senha.</h1>
+          <ResetPassword />
+        </section>
+      );
     if (page === "login")
       return (
         <div className="auth">
@@ -734,7 +910,10 @@ export default function Hacko() {
               </>
             ) : (
               <>
-                <LoginOptions providers={boot.authProviders || []} />
+                <LoginOptions
+                  providers={boot.authProviders || []}
+                  passwordReset={!!boot.passwordReset || location.hostname === "localhost"}
+                />
               </>
             )}
           </section>
@@ -924,6 +1103,7 @@ export default function Hacko() {
                     Abrir organização
                   </a>
                 </section>
+                <DeleteAccount />
                 <section className="panel">
                   <h3>Notificações</h3>
                   {boot.notifications.map((n: Row) => (

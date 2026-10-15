@@ -76,7 +76,7 @@ const validation = compiled("../lib/validation.ts", {});
 const api = compiled("../app/api/hacko/route.ts", {
   "cloudflare:workers": { env: { DB: db } },
   "../../session": { getCurrentUser: async () => user },
-  "../../../lib/auth": { enabledProviders: () => ["google", "github", "linkedin"] },
+  "../../../lib/auth": { enabledProviders: () => ["google", "github", "linkedin"], emailEnabled: () => false },
   "../../../lib/validation": validation,
   "../../../lib/domain.mjs": domain,
 });
@@ -386,4 +386,69 @@ test("auth: cadastro e login com senha, sessão, logout e proteções", async ()
   const r = await auth.oauth("google", new Request(origin + "/api/auth/google"));
   assert.equal(r.headers.get("location"), "/#/login?erro=provedor_indisponivel");
   assert.deepEqual([...auth.enabledProviders()], []);
+});
+
+test("conta: esqueci minha senha e exclusão de conta", async () => {
+  const auth = compiled("../lib/auth.ts", { "cloudflare:workers": { env: { DB: db } } });
+  const origin = "http://localhost:5173";
+  const call = (path, body) =>
+    auth[path](
+      new Request(origin + "/api/auth/" + path, {
+        method: "POST",
+        headers: { origin, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    );
+  assert.equal((await call("signup", { email: "rita@example.test", password: "Senha-antiga1" })).status, 200);
+  const logs = [];
+  const origLog = console.log;
+  console.log = (...a) => logs.push(a.join(" "));
+  try {
+    // e-mail sem conta recebe a mesma resposta (não revela quem está cadastrado)
+    assert.equal((await call("forgotPassword", { email: "ninguem@example.test" })).status, 200);
+    assert.equal(logs.length, 0);
+    assert.equal((await call("forgotPassword", { email: "Rita@example.test" })).status, 200);
+  } finally {
+    console.log = origLog;
+  }
+  const token = new URL(logs.at(-1).split(" ").at(-1).replace("/#/redefinir", "/redefinir")).searchParams.get("token");
+  assert.ok(token);
+  assert.ok(!sql.prepare("SELECT 1 FROM password_resets WHERE id=?").get(token)); // só o hash fica salvo
+  assert.equal((await call("resetPassword", { token, password: "fraca" })).status, 400);
+  assert.equal((await call("resetPassword", { token: "forjado", password: "Senha-nova1" })).status, 400);
+  assert.equal((await call("resetPassword", { token, password: "Senha-nova1" })).status, 200);
+  assert.equal((await call("resetPassword", { token, password: "Outra-senha2" })).status, 400); // uso único
+  assert.equal((await call("login", { email: "rita@example.test", password: "Senha-antiga1" })).status, 401);
+  assert.equal((await call("login", { email: "rita@example.test", password: "Senha-nova1" })).status, 200);
+
+  // exclusão: líder de equipe com outros membros precisa dissolver antes
+  // cenário: cópia do evento com uma equipe de dois membros liderada por bob
+  const cols = sql
+    .prepare("SELECT name FROM pragma_table_info('events') WHERE name<>'id'")
+    .all()
+    .map((c) => c.name)
+    .join(",");
+  sql.exec(`INSERT INTO events(id,${cols}) SELECT 'ev-del',${cols} FROM events LIMIT 1`);
+  sql.exec(
+    "INSERT INTO teams(id,event_id,name,leader_id,status,skills,description) VALUES('t-del','ev-del','Equipe del','bob','forming','','')",
+  );
+  sql.exec("INSERT INTO team_members(team_id,event_id,user_id) VALUES('t-del','ev-del','bob'),('t-del','ev-del','carol')");
+  as("bob");
+  assert.equal((await post({ op: "account.delete", confirm: "EXCLUIR" })).status, 409);
+  as("dave");
+  assert.equal((await post({ op: "account.delete", confirm: "sim" })).status, 400);
+  const ok = await api.POST(
+    new Request("https://hacko.test/api/hacko", {
+      method: "POST",
+      headers: { origin: "https://hacko.test", "content-type": "application/json" },
+      body: JSON.stringify({ op: "account.delete", confirm: "EXCLUIR" }),
+    }),
+  );
+  assert.equal(ok.status, 200);
+  assert.match(ok.headers.get("set-cookie"), /hacko_session=; .*Max-Age=0/);
+  for (const t of ["profiles WHERE id", "registrations WHERE user_id", "favorites WHERE user_id", "notifications WHERE user_id"])
+    assert.equal(sql.prepare(`SELECT count(*) n FROM ${t}='dave'`).get().n, 0, t);
+  // dono de organização com inscritos não pode apagar a conta sem resolver o evento
+  as("owner");
+  assert.equal((await post({ op: "account.delete", confirm: "EXCLUIR" })).status, 409);
 });

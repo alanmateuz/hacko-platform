@@ -374,3 +374,97 @@ export function passwordProblems(password: string) {
   if (!/[0-9]/.test(password)) missing.push("um número");
   return missing;
 }
+
+// ===== Esqueci minha senha =====
+const RESET_MINUTES = 30;
+export const emailEnabled = () => !!vars.RESEND_API_KEY;
+
+async function sendEmail(to: string, subject: string, text: string, html: string) {
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + (vars.RESEND_API_KEY || "").trim(),
+      "Content-Type": "application/json",
+      "User-Agent": "hacko/1.0 (+https://hacko.com.br)",
+    },
+    body: JSON.stringify({
+      from: vars.AUTH_FROM_EMAIL || "Hacko <nao-responda@hacko.com.br>",
+      to,
+      subject,
+      text,
+      html,
+    }),
+  });
+  if (!res.ok) console.error("Resend error", res.status, (await res.text().catch(() => "")).slice(0, 500));
+  return res.ok;
+}
+
+// POST /api/auth/forgot {email}: sempre responde igual, para não revelar quais e-mails têm conta.
+export async function forgotPassword(request: Request) {
+  if (request.headers.get("origin") !== new URL(request.url).origin) return fail("Origem inválida.", 403);
+  const body: any = await request.json().catch(() => ({}));
+  const email = String(body.email || "")
+    .trim()
+    .toLowerCase();
+  if (!EMAIL_RE.test(email) || email.length > 254) return fail("Informe um e-mail válido.", 400);
+  const local = ["localhost", "127.0.0.1"].includes(new URL(request.url).hostname);
+  if (!emailEnabled() && !local) return fail("A recuperação de senha ainda não está disponível.", 503);
+  const done = Response.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+  const user = await db().prepare("SELECT id FROM users WHERE email=?").bind(email).first<{ id: string }>();
+  if (!user) return done;
+  const recent = await db()
+    .prepare("SELECT count(*) n, max(created_at) last FROM password_resets WHERE user_id=? AND created_at>?")
+    .bind(user.id, new Date(Date.now() - 3600000).toISOString())
+    .first<{ n: number; last: string | null }>();
+  if (recent && (recent.n >= 5 || (recent.last && Date.now() - Date.parse(recent.last) < 60000))) return done;
+  const token = randomToken();
+  await db().batch([
+    db()
+      .prepare("DELETE FROM password_resets WHERE created_at<=?")
+      .bind(new Date(Date.now() - 86400000).toISOString()),
+    db()
+      .prepare("INSERT INTO password_resets(id,user_id,expires_at,created_at) VALUES(?,?,?,?)")
+      .bind(await sha256(token), user.id, new Date(Date.now() + RESET_MINUTES * 60000).toISOString(), now()),
+  ]);
+  // O token vai no fragmento (#), que não é enviado em requisições nem aparece em logs do servidor.
+  const link = new URL(request.url).origin + "/#/redefinir?token=" + token;
+  if (!emailEnabled()) {
+    console.log("[dev] link de redefinição para", email, link);
+    return done;
+  }
+  await sendEmail(
+    email,
+    "Redefinir sua senha da Hacko",
+    `Recebemos um pedido para redefinir a senha da sua conta na Hacko.\n\nUse este link (válido por ${RESET_MINUTES} minutos):\n${link}\n\nSe não foi você, ignore este e-mail: sua senha continua a mesma.`,
+    `<p>Recebemos um pedido para redefinir a senha da sua conta na <b>hacko↗</b>.</p><p><a href="${link}" style="background:#0367FC;color:#fff;padding:12px 20px;border-radius:10px;text-decoration:none;display:inline-block">Criar nova senha</a></p><p style="color:#626975;font-size:13px">O link vale por ${RESET_MINUTES} minutos. Se não foi você, ignore este e-mail: sua senha continua a mesma.</p>`,
+  );
+  return done;
+}
+
+// POST /api/auth/reset {token, password}: troca a senha, encerra todas as sessões e entra.
+export async function resetPassword(request: Request) {
+  if (request.headers.get("origin") !== new URL(request.url).origin) return fail("Origem inválida.", 403);
+  const body: any = await request.json().catch(() => ({}));
+  const password = String(body.password || "");
+  const weak = passwordProblems(password);
+  if (password.length > 200) return fail("Senha muito longa.", 400);
+  if (weak.length) return fail("A senha precisa ter " + weak.join(", ") + ".", 400);
+  const row = await db()
+    .prepare(
+      "UPDATE password_resets SET used_at=? WHERE id=? AND used_at IS NULL AND expires_at>? RETURNING user_id",
+    )
+    .bind(now(), await sha256(String(body.token || "")), now())
+    .first<{ user_id: string }>();
+  if (!row) return fail("Link inválido ou expirado. Peça um novo.", 400);
+  await db().batch([
+    // Quem recebeu o link provou ser dono do e-mail.
+    db()
+      .prepare("UPDATE users SET password_hash=?,email_verified=1 WHERE id=?")
+      .bind(await hashPassword(password), row.user_id),
+    db().prepare("DELETE FROM sessions WHERE user_id=?").bind(row.user_id),
+    db()
+      .prepare("UPDATE password_resets SET used_at=? WHERE user_id=? AND used_at IS NULL")
+      .bind(now(), row.user_id),
+  ]);
+  return sessionResponse(row.user_id, request);
+}

@@ -210,3 +210,13 @@ export const loginFailures = sqliteTable("login_failures", {
   email: text("email").notNull(),
   createdAt: text("created_at").notNull(),
 });
+// Pedidos de redefinição de senha; id = SHA-256 do token enviado por e-mail.
+export const passwordResets = sqliteTable("password_resets", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  expiresAt: text("expires_at").notNull(),
+  usedAt: text("used_at"),
+  createdAt: text("created_at").notNull(),
+});
