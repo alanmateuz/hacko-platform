@@ -219,6 +219,12 @@ export async function GET(request: Request) {
               user.userId,
             )
           : [],
+        myTeams: user
+          ? await all(
+              "SELECT m.event_id,m.team_id,t.name,t.leader_id FROM team_members m JOIN teams t ON t.id=m.team_id WHERE m.user_id=?",
+              user.userId,
+            )
+          : [],
         favorites: user ? await all("SELECT event_id FROM favorites WHERE user_id=?", user.userId) : [],
         notifications: user
           ? await all(
@@ -233,8 +239,25 @@ export async function GET(request: Request) {
     }
     if (action === "event") {
       const e = await visibleEvent(id, user?.userId);
+      const mine = user
+        ? await one(
+            "SELECT t.*,(SELECT count(*) FROM team_members x WHERE x.team_id=t.id) members FROM team_members m JOIN teams t ON t.id=m.team_id WHERE m.event_id=? AND m.user_id=?",
+            id,
+            user.userId,
+          )
+        : null;
       return json({
         event: e,
+        myTeam: mine
+          ? {
+              ...mine,
+              people: await all(
+                `SELECT p.id,p.name,p.email,p.skills,(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v FROM team_members m JOIN profiles p ON p.id=m.user_id WHERE m.team_id=? ORDER BY p.id=? DESC,p.name`,
+                mine.id,
+                mine.leader_id,
+              ),
+            }
+          : null,
         teams: await teamRows(id),
         participants: await all(
           `SELECT p.id,p.name,p.skills,p.bio,p.city,p.availability,p.linkedin,p.github,(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v FROM profiles p JOIN registrations r ON r.user_id=p.id WHERE r.event_id=? AND r.status='active' AND p.visible=1`,
@@ -255,7 +278,13 @@ export async function GET(request: Request) {
       if (!t) fail("Equipe não encontrada.", 404);
       await visibleEvent(t.event_id, u.userId);
       const member = await one("SELECT 1 FROM team_members WHERE team_id=? AND user_id=?", id, u.userId);
+      const inEvent = await one(
+        "SELECT team_id FROM team_members WHERE event_id=? AND user_id=?",
+        t.event_id,
+        u.userId,
+      );
       return json({
+        myTeamId: inEvent?.team_id || null,
         event: await one(
           "SELECT id,title,starts_at,ends_at,submission_deadline FROM events WHERE id=?",
           t.event_id,
@@ -663,9 +692,31 @@ export async function POST(request: Request) {
         ))
       )
         fail("Você não possui inscrição ativa neste evento.", 409);
-      if (await one("SELECT 1 FROM team_members WHERE event_id=? AND user_id=?", id, u.userId))
-        fail("Saia ou dissolva sua equipe antes de cancelar.");
+      const myTeam = await one(
+        "SELECT t.id,t.name,t.leader_id,(SELECT count(*) FROM team_members x WHERE x.team_id=t.id) members FROM team_members m JOIN teams t ON t.id=m.team_id WHERE m.event_id=? AND m.user_id=?",
+        id,
+        u.userId,
+      );
+      if (myTeam && myTeam.leader_id === u.userId && myTeam.members > 1)
+        fail(
+          `Você lidera a equipe ${myTeam.name}. Dissolva a equipe (ou peça para os integrantes saírem) antes de cancelar.`,
+          409,
+        );
+      const leaveTeam = !myTeam
+        ? []
+        : myTeam.leader_id === u.userId
+          ? [
+              stmt("DELETE FROM team_requests WHERE team_id=?", myTeam.id),
+              stmt("DELETE FROM team_members WHERE team_id=?", myTeam.id),
+              stmt("DELETE FROM teams WHERE id=?", myTeam.id),
+            ]
+          : [
+              stmt("UPDATE teams SET status='forming' WHERE id=?", myTeam.id),
+              stmt("DELETE FROM team_members WHERE team_id=? AND user_id=?", myTeam.id, u.userId),
+              notify(myTeam.leader_id, `Um integrante saiu da equipe ${myTeam.name} (inscrição cancelada).`),
+            ];
       await db().batch([
+        ...leaveTeam,
         stmt("UPDATE registrations SET status='cancelled' WHERE event_id=? AND user_id=?", id, u.userId),
         stmt(
           "UPDATE team_requests SET status='cancelled' WHERE user_id=? AND team_id IN(SELECT id FROM teams WHERE event_id=?) AND status='pending'",
@@ -725,6 +776,8 @@ export async function POST(request: Request) {
         .slice(0, 1000);
       if (op === "team.submit") {
         if (t.leader_id !== u.userId) fail("Apenas o líder envia a entrega da equipe.", 403);
+        if (members.length < e.team_min)
+          fail(`A equipe precisa de pelo menos ${e.team_min} integrantes para enviar a entrega.`, 409);
         const deadline = e.submission_deadline || e.ends_at;
         if (now() < e.starts_at) fail("As entregas abrem no início do evento.", 409);
         if (now() > deadline) fail("O prazo de entrega terminou.", 409);
@@ -783,7 +836,8 @@ export async function POST(request: Request) {
       const t = await one("SELECT * FROM teams WHERE id=?", id);
       if (!t) fail("Equipe não encontrada.", 404);
       const e = await visibleEvent(t.event_id, u.userId);
-      if (now() >= e.starts_at) fail("A formação de equipes encerrou com o início do evento.");
+      if (op !== "team.confirm" && now() >= e.starts_at)
+        fail("A formação de equipes encerrou com o início do evento.");
       const leader = t.leader_id === u.userId;
       if (op === "team.request" || op === "team.invite") {
         if (t.status !== "forming") fail("Equipe já confirmada.");
@@ -869,6 +923,7 @@ export async function POST(request: Request) {
           stmt("UPDATE teams SET status='forming' WHERE id=?", id),
           stmt("DELETE FROM team_members WHERE team_id=? AND user_id=?", id, u.userId),
           notify(u.userId, "Você saiu da equipe " + t.name),
+          notify(t.leader_id, "Um integrante saiu da equipe " + t.name + "."),
         ]);
         return json({ ok: true });
       }

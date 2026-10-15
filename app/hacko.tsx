@@ -2248,15 +2248,79 @@ export default function Hacko() {
                         Contas de empresa organizam hackathons e não se inscrevem. Para participar, use uma
                         conta de participante.
                       </p>
+                    ) : registered && data.myTeam ? (
+                      (() => {
+                        const t = data.myTeam;
+                        const iLead = t.leader_id === boot.user?.id;
+                        const locked = new Date().toISOString() >= e.starts_at;
+                        return (
+                          <div className="my-team">
+                            <p className="notice">Sua inscrição está confirmada.</p>
+                            <span className="eyebrow">SUA EQUIPE</span>
+                            <h3>{t.name}</h3>
+                            <div className="tags">
+                              <Badge value={formationOf(t, e)} />
+                              {locked && <Badge value={deliveryOf(t, e)} />}
+                            </div>
+                            <ul className="my-team-people">
+                              {t.people.map((m: Row) => (
+                                <li key={m.id}>
+                                  <Avatar p={m} />
+                                  <div>
+                                    <b>
+                                      {m.name}
+                                      {m.id === t.leader_id && <span className="pill">Líder</span>}
+                                      {m.id === boot.user?.id && <small> (você)</small>}
+                                    </b>
+                                    <a href={"mailto:" + m.email}>{m.email}</a>
+                                    {m.skills && <small>{m.skills}</small>}
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                            <a className="button" href={href("/team/" + t.id)}>
+                              Abrir página da equipe
+                            </a>
+                            {locked ? (
+                              <small>
+                                O evento já começou: a formação das equipes e as inscrições estão travadas.
+                              </small>
+                            ) : (
+                              <div className="actions">
+                                {iLead
+                                  ? button(
+                                      "Dissolver equipe",
+                                      { op: "team.dissolve", id: t.id },
+                                      "Dissolver a equipe? Todos os integrantes ficarão sem equipe.",
+                                    )
+                                  : button(
+                                      "Sair da equipe",
+                                      { op: "team.leave", id: t.id },
+                                      "Sair desta equipe?",
+                                    )}
+                                {button(
+                                  "Cancelar inscrição",
+                                  { op: "cancel", id },
+                                  iLead && t.members > 1
+                                    ? "Você lidera uma equipe com outros integrantes: dissolva a equipe antes. Tentar mesmo assim?"
+                                    : "Cancelar sua inscrição? Você também sairá da equipe " + t.name + ".",
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()
                     ) : registered ? (
                       <>
-                        <p className="notice">Sua inscrição está confirmada.</p>
+                        <p className="notice">
+                          Sua inscrição está confirmada. Agora, monte ou encontre uma equipe.
+                        </p>
                         <div className="actions">
                           <a className="button" href={href("/create/" + id)}>
                             Criar equipe
                           </a>
                           <a className="button secondary" href={href("/teams/" + id)}>
-                            Já tenho equipe / Buscar
+                            Buscar equipe
                           </a>
                         </div>
                         {button(
@@ -2437,7 +2501,15 @@ export default function Hacko() {
           <span className="eyebrow">MONTE SUA EQUIPE</span>
           <h1>Uma boa ideia precisa de gente.</h1>
           {account() ||
-            (!boot.registrations.some((r: Row) => r.event_id === id && r.status === "active") ? (
+            ((boot.myTeams || []).some((m: Row) => m.event_id === id) ? (
+              <p className="notice">
+                Você já está na equipe <b>{boot.myTeams.find((m: Row) => m.event_id === id).name}</b> neste
+                evento. Só é possível participar de uma equipe por evento.{" "}
+                <a href={href("/team/" + boot.myTeams.find((m: Row) => m.event_id === id).team_id)}>
+                  Ver minha equipe →
+                </a>
+              </p>
+            ) : !boot.registrations.some((r: Row) => r.event_id === id && r.status === "active") ? (
               <p className="notice">
                 Inscreva-se no evento antes de criar uma equipe.{" "}
                 <a href={href("/event/" + id)}>Ir para a inscrição →</a>
@@ -2522,6 +2594,11 @@ export default function Hacko() {
                         })}
                       </>
                     )}
+                  </p>
+                ) : data.myTeamId ? (
+                  <p className="notice">
+                    Você já participa de outra equipe neste evento.{" "}
+                    <a href={href("/team/" + data.myTeamId)}>Ver minha equipe →</a>
                   </p>
                 ) : (
                   account() || button("Solicitar entrada", { op: "team.request", id })
