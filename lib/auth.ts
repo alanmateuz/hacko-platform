@@ -321,7 +321,8 @@ async function sessionResponse(userId: string, request: Request) {
 export async function signup(request: Request) {
   const c = await credentials(request);
   if (c instanceof Response) return c;
-  if (c.name.length < 2 || c.name.length > 160) return fail("Informe seu nome completo.", 400);
+  if (c.name.length > 160 || c.name.split(" ").filter((w) => w.length > 0).length < 2)
+    return fail("Informe seu nome e sobrenome.", 400);
   const weak = passwordProblems(c.password);
   if (weak.length) return fail("A senha precisa ter " + weak.join(", ") + ".", 400);
   if (await db().prepare("SELECT 1 FROM users WHERE email=?").bind(c.email).first())

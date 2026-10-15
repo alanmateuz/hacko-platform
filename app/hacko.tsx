@@ -126,6 +126,11 @@ const nav = (s: string) => {
   location.hash = s;
 };
 const href = (s: string) => "#" + s;
+// "Maria Clara de Souza" → "Maria Souza" (primeiro nome + último sobrenome).
+const shortName = (name?: string) => {
+  const parts = (name || "").trim().split(/\s+/).filter(Boolean);
+  return parts.length > 1 ? parts[0] + " " + parts[parts.length - 1] : parts[0] || "";
+};
 const tags = (s = "") =>
   s
     .split(",")
@@ -593,7 +598,7 @@ function LoginOptions({ providers, passwordReset }: { providers: string[]; passw
       >
         {signup && (
           <label>
-            Nome completo
+            Nome e sobrenome
             <input name="name" required minLength={2} maxLength={160} autoComplete="name" />
           </label>
         )}
@@ -1857,7 +1862,7 @@ export default function Hacko() {
           ))}
         </nav>
         <a className="account-link" href={boot?.user ? "#/profile" : "#/login"}>
-          {boot?.profile?.name || boot?.user?.name || "Minha conta"} ↗
+          {shortName(boot?.profile?.name || boot?.user?.name) || "Minha conta"} ↗
         </a>
         <div className="mobile-tabs">
           <a href="#/">Explorar</a>

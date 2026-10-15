@@ -371,10 +371,16 @@ test("auth: cadastro e login com senha, sessão, logout e proteções", async ()
     ).error,
     /número/,
   );
-  // nome completo é obrigatório no cadastro
+  // nome e sobrenome são obrigatórios no cadastro
   assert.match(
-    (await (await call("signup", { email: "sem-nome@example.test", password: "Senha-forte-1" })).json()).error,
-    /nome completo/,
+    (await (await call("signup", { email: "sem-nome@example.test", password: "Senha-forte-1" })).json())
+      .error,
+    /sobrenome/,
+  );
+  assert.equal(
+    (await call("signup", { name: "Maria", email: "so-nome@example.test", password: "Senha-forte-1" }))
+      .status,
+    400,
   );
   const created = await call("signup", {
     name: "  Pessoa   Teste ",
