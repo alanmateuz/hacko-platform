@@ -582,7 +582,7 @@ function LoginOptions({ providers, passwordReset }: { providers: string[]; passw
           const r = await fetch("/api/auth/" + mode, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email: f.email, password: f.password }),
+            body: JSON.stringify({ name: f.name, email: f.email, password: f.password }),
           });
           const d = (await r.json().catch(() => ({}))) as Row;
           if (!r.ok) return setState({ error: d.error || "Não foi possível continuar." });
@@ -591,6 +591,12 @@ function LoginOptions({ providers, passwordReset }: { providers: string[]; passw
           location.reload();
         }}
       >
+        {signup && (
+          <label>
+            Nome completo
+            <input name="name" required minLength={2} maxLength={160} autoComplete="name" />
+          </label>
+        )}
         <label>
           E-mail
           <input name="email" type="email" required autoComplete="email" />
@@ -1851,7 +1857,7 @@ export default function Hacko() {
           ))}
         </nav>
         <a className="account-link" href={boot?.user ? "#/profile" : "#/login"}>
-          {boot?.profile?.name || "Minha conta"} ↗
+          {boot?.profile?.name || boot?.user?.name || "Minha conta"} ↗
         </a>
         <div className="mobile-tabs">
           <a href="#/">Explorar</a>
