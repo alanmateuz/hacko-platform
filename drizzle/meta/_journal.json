@@ -64,6 +64,13 @@
       "when": 1792039215551,
       "tag": "0008_broken_vulture",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1792069274871,
+      "tag": "0009_groovy_ultragirl",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { getCurrentUser } from "../../session";
+import { deleteTeamFiles, editWindowError, MAX_ITEMS, storageKey, teamAccess } from "../../../lib/deliveries";
 import { emailEnabled, enabledProviders } from "../../../lib/auth";
 import {
   companySchema,
@@ -285,6 +286,13 @@ export async function GET(request: Request) {
       );
       return json({
         myTeamId: inEvent?.team_id || null,
+        items:
+          (await teamAccess(id, u.userId))?.organizer || member
+            ? await all(
+                "SELECT d.id,d.team_id,d.kind,d.name,d.mime,d.size,d.url,d.created_at,p.name uploader FROM delivery_items d LEFT JOIN profiles p ON p.id=d.uploaded_by WHERE d.team_id=? ORDER BY d.created_at",
+                id,
+              )
+            : [],
         event: await one(
           "SELECT id,title,starts_at,ends_at,submission_deadline FROM events WHERE id=?",
           t.event_id,
@@ -359,6 +367,10 @@ export async function GET(request: Request) {
         ),
         teams: await all(
           "SELECT t.*,l.name leader_name,(SELECT count(*) FROM team_members m WHERE m.team_id=t.id) members FROM teams t LEFT JOIN profiles l ON l.id=t.leader_id WHERE t.event_id=? ORDER BY t.name",
+          id,
+        ),
+        items: await all(
+          "SELECT d.id,d.team_id,d.kind,d.name,d.mime,d.size,d.url,d.created_at,p.name uploader FROM delivery_items d LEFT JOIN profiles p ON p.id=d.uploaded_by WHERE d.team_id IN (SELECT id FROM teams WHERE event_id=?) ORDER BY d.created_at",
           id,
         ),
         runs: await all(
@@ -466,6 +478,7 @@ export async function POST(request: Request) {
         stmt(`DELETE FROM matching_runs WHERE event_id IN (${orgEvents})`, uidv),
         stmt(`DELETE FROM team_requests WHERE team_id IN (${evTeams})`, uidv),
         stmt(`DELETE FROM team_members WHERE event_id IN (${orgEvents})`, uidv),
+        stmt(`DELETE FROM delivery_items WHERE team_id IN (${evTeams})`, uidv),
         stmt(`DELETE FROM teams WHERE event_id IN (${orgEvents})`, uidv),
         stmt(`DELETE FROM registrations WHERE event_id IN (${orgEvents})`, uidv),
         stmt(`DELETE FROM favorites WHERE event_id IN (${orgEvents})`, uidv),
@@ -476,6 +489,7 @@ export async function POST(request: Request) {
         // Participação pessoal.
         stmt(`DELETE FROM team_requests WHERE user_id=? OR team_id IN (${myTeams})`, uidv, uidv),
         stmt(`DELETE FROM team_members WHERE user_id=? OR team_id IN (${myTeams})`, uidv, uidv),
+        stmt("DELETE FROM delivery_items WHERE team_id IN (SELECT id FROM teams WHERE leader_id=?)", uidv),
         stmt("DELETE FROM teams WHERE leader_id=?", uidv),
         stmt("DELETE FROM registrations WHERE user_id=?", uidv),
         stmt("DELETE FROM favorites WHERE user_id=?", uidv),
@@ -708,6 +722,7 @@ export async function POST(request: Request) {
           ? [
               stmt("DELETE FROM team_requests WHERE team_id=?", myTeam.id),
               stmt("DELETE FROM team_members WHERE team_id=?", myTeam.id),
+              stmt("DELETE FROM delivery_items WHERE team_id=?", myTeam.id),
               stmt("DELETE FROM teams WHERE id=?", myTeam.id),
             ]
           : [
@@ -766,6 +781,41 @@ export async function POST(request: Request) {
       return json({ id: tid });
     }
     // Entrega do projeto: o líder envia; a organização acompanha e avalia.
+    if (op === "delivery.link" || op === "delivery.remove") {
+      const t = await teamAccess(id, u.userId);
+      if (!t) fail("Equipe não encontrada.", 404);
+      const blocked = editWindowError(t!);
+      if (blocked) fail(blocked, t!.member ? 409 : 403);
+      if (op === "delivery.link") {
+        const link = String(body.url || "").trim();
+        if (!/^https:\/\/[^\s]+$/.test(link) || link.length > 500) fail("Informe um link https válido.");
+        const label =
+          String(body.name || "")
+            .trim()
+            .slice(0, 120) || link.replace(/^https:\/\//, "").slice(0, 120);
+        const n = await one("SELECT count(*) n FROM delivery_items WHERE team_id=?", id);
+        if (n.n >= MAX_ITEMS) fail(`Limite de ${MAX_ITEMS} itens por entrega.`, 409);
+        await stmt(
+          "INSERT INTO delivery_items(id,team_id,kind,name,mime,size,url,uploaded_by,created_at) VALUES(?,?,'link',?,'',0,?,?,?)",
+          uid(),
+          id,
+          label,
+          link,
+          u.userId,
+          now(),
+        ).run();
+        return json({ ok: true });
+      }
+      const item = await one(
+        "SELECT * FROM delivery_items WHERE id=? AND team_id=?",
+        String(body.itemId || ""),
+        id,
+      );
+      if (!item) fail("Item não encontrado.", 404);
+      await stmt("DELETE FROM delivery_items WHERE id=?", item.id).run();
+      if (item.kind === "file" && env.BUCKET) await env.BUCKET.delete(storageKey(id, item.id));
+      return json({ ok: true });
+    }
     if (op === "team.submit" || op === "team.review") {
       const t = await one("SELECT * FROM teams WHERE id=?", id);
       if (!t) fail("Equipe não encontrada.", 404);
@@ -781,10 +831,12 @@ export async function POST(request: Request) {
         const deadline = e.submission_deadline || e.ends_at;
         if (now() < e.starts_at) fail("As entregas abrem no início do evento.", 409);
         if (now() > deadline) fail("O prazo de entrega terminou.", 409);
-        if (t.submission_status === "evaluated") fail("Esta entrega já foi avaliada.", 409);
-        const link = String(body.url || "").trim();
-        if (!/^https:\/\/[^\s]+$/.test(link) || link.length > 500)
+        if (t.submission_status === "evaluated") fail("Esta entrega já foi validada.", 409);
+        const link = String(body.url || t.submission_url || "").trim();
+        if (link && (!/^https:\/\/[^\s]+$/.test(link) || link.length > 500))
           fail("Informe um link https válido do projeto.");
+        const items = await one("SELECT count(*) n FROM delivery_items WHERE team_id=?", id);
+        if (!items.n && !link) fail("Anexe pelo menos uma foto, PDF ou link antes de enviar.", 409);
         await db().batch([
           stmt(
             "UPDATE teams SET submission_status='submitted',submission_url=?,submission_note=?,submitted_at=? WHERE id=?",
@@ -795,18 +847,23 @@ export async function POST(request: Request) {
           ),
           notify(
             (await one("SELECT owner_id FROM organizations WHERE id=?", e.org_id)).owner_id,
-            `A equipe ${t.name} enviou a entrega em ${e.title}.`,
+            `A equipe ${t.name} enviou a entrega em ${e.title}. Ela aguarda a validação da sua equipe.`,
           ),
           ...members
             .filter((m: any) => m.user_id !== u.userId)
-            .map((m: any) => notify(m.user_id, `A entrega da equipe ${t.name} foi enviada.`)),
+            .map((m: any) =>
+              notify(
+                m.user_id,
+                `Entrega da equipe ${t.name} confirmada. Aguardando validação da organização.`,
+              ),
+            ),
         ]);
         return json({ ok: true });
       }
       await ownEvent(t.event_id, u.userId);
       const labels: Record<string, string> = {
-        reviewing: "está em avaliação",
-        evaluated: "foi avaliada",
+        reviewing: "está em validação",
+        evaluated: "foi validada",
         pending: "precisa de ajustes",
       };
       const next = String(body.status || "");
@@ -934,9 +991,11 @@ export async function POST(request: Request) {
         await db().batch([
           stmt("DELETE FROM team_requests WHERE team_id=?", id),
           stmt("DELETE FROM team_members WHERE team_id=?", id),
+          stmt("DELETE FROM delivery_items WHERE team_id=?", id),
           stmt("DELETE FROM teams WHERE id=?", id),
           ...ms.map((m) => notify(m.user_id, "Equipe " + t.name + " dissolvida pelo líder.")),
         ]);
+        await deleteTeamFiles(id);
         return json({ ok: true });
       }
       if (op === "team.confirm") {

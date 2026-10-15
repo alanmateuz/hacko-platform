@@ -1633,3 +1633,57 @@ button.danger:disabled {
 .my-team-people small {
   color: var(--muted);
 }
+
+.delivery-items {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.delivery-items li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.delivery-items li > div {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+.delivery-items small {
+  color: var(--muted);
+}
+.delivery-thumb {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  font-weight: 700;
+  color: var(--action);
+  text-decoration: none;
+}
+.delivery-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.attach-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 8px 0 4px;
+}
+.link-form,
+.submit-form {
+  margin-top: 16px;
+}
