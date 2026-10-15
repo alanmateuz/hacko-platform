@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { searchCatalog, normalize } from "../lib/domain.mjs";
 type Row = Record<string, any>;
 // Brand arrow (identidade visual Hacko): diagonal com ponta em "L".
@@ -1009,11 +1009,11 @@ function PeopleOverview({ data }: { data: Row }) {
   );
 }
 const DELIVERY: Record<string, [string, string]> = {
-  none: ["Não entregue", "muted"],
-  submitted: ["Entregue", "blue"],
+  none: ["Aguardando envio", "muted"],
+  submitted: ["Enviado", "green"],
   reviewing: ["Em avaliação", "yellow"],
-  evaluated: ["Avaliada", "lime"],
-  pending: ["Pendente", "red"],
+  evaluated: ["Avaliado", "lime"],
+  pending: ["Revisar envio", "red"],
 };
 function DeliveryBadge({ value }: { value?: string }) {
   const [label, tone] = DELIVERY[value || "none"] || DELIVERY.none;
@@ -1052,8 +1052,58 @@ function ReviewControl({ team, onSave, busy }: { team: Row; onSave: (body: Row) 
     </div>
   );
 }
-// Planilha única do evento: aba de participantes e aba de equipes com acompanhamento de entrega.
-function EventSheet({
+// "Hoje, 10h42" / "Ontem, 18h32" / "12 out, 09h10".
+const pessoas = (n: number) => `${n} ${n === 1 ? "pessoa" : "pessoas"}`;
+function relTime(iso?: string | null) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const hm = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }).replace(":", "h");
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(new Date()) - day(d)) / 86400000);
+  if (diff === 0) return "Hoje, " + hm;
+  if (diff === 1) return "Ontem, " + hm;
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }).replace(".", "") + ", " + hm;
+}
+// Situação da formação da equipe.
+function formationOf(t: Row, e: Row): [string, string] {
+  const n = Number(t.members || 0);
+  if (n === 0) return ["Sem integrantes", "red"];
+  if (t.status === "confirmed") return ["Confirmada", "lime"];
+  if (n < e.team_min) return [`Faltando gente · ${n}/${e.team_min}`, "yellow"];
+  if (n >= e.team_max) return ["Completa · lotada", "blue"];
+  return ["Completa", "blue"];
+}
+// Situação da entrega, considerando o prazo do evento.
+function deliveryOf(t: Row, e: Row): [string, string] {
+  const map: Record<string, [string, string]> = {
+    submitted: ["Enviado", "green"],
+    reviewing: ["Em avaliação", "yellow"],
+    evaluated: ["Avaliado", "lime"],
+    pending: ["Revisar envio", "red"],
+  };
+  if (map[t.submission_status]) return map[t.submission_status];
+  const deadline = e.submission_deadline || e.ends_at;
+  const now = Date.now();
+  if (now > Date.parse(deadline)) return ["Não entregue", "red"];
+  if (Date.parse(deadline) - now < 48 * 3600000) return ["Prazo próximo", "yellow"];
+  return ["Aguardando envio", "muted"];
+}
+function Badge({ value }: { value: [string, string] }) {
+  return <span className={"delivery " + value[1]}>{value[0]}</span>;
+}
+function downloadCsv(name: string, rows: unknown[][]) {
+  const cell = (v: unknown) => '"' + String(v ?? "").replace(/"/g, '""') + '"';
+  const blob = new Blob(["﻿" + rows.map((r) => r.map(cell).join(";")).join("\n")], {
+    type: "text/csv;charset=utf-8",
+  });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+// Painel do evento para a organização: resumo, participantes (lista ou por equipe) e equipes/entregas.
+function EventDashboard({
   data,
   busy,
   onAction,
@@ -1064,175 +1114,368 @@ function EventSheet({
   onAction: (body: Row) => void;
   confirmButton: (t: Row) => ReactNode;
 }) {
-  // A aba escolhida sobrevive ao recarregamento dos dados depois de salvar uma avaliação.
-  const [tab, setTabState] = useState<"participants" | "teams">(() => {
+  const e: Row = data.event;
+  const regs: Row[] = (data.registrations || [])
+    .filter((r: Row) => r.status === "active")
+    .sort((a: Row, b: Row) => String(a.name).localeCompare(String(b.name), "pt-BR"));
+  const teams: Row[] = data.teams || [];
+  const [view, setViewState] = useState<"list" | "teams">(() => {
     try {
-      return sessionStorage.getItem("hacko-sheet-tab") === "teams" ? "teams" : "participants";
+      return sessionStorage.getItem("hacko-people-view") === "teams" ? "teams" : "list";
     } catch {
-      return "participants";
+      return "list";
     }
   });
-  const setTab = (v: "participants" | "teams") => {
-    setTabState(v);
+  const setView = (v: "list" | "teams") => {
+    setViewState(v);
     try {
-      sessionStorage.setItem("hacko-sheet-tab", v);
+      sessionStorage.setItem("hacko-people-view", v);
     } catch {}
   };
-  const regs: Row[] = data.registrations || [];
-  const teams: Row[] = data.teams || [];
-  const teamName = (id: string) => teams.find((t) => t.id === id)?.name;
-  const delivered = teams.filter((t) => t.submission_status && t.submission_status !== "none").length;
+  const [q, setQ] = useState("");
+  // A equipe aberta e a visão escolhida sobrevivem ao recarregamento dos dados depois de salvar.
+  const [open, setOpenState] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem("hacko-open-team");
+    } catch {
+      return null;
+    }
+  });
+  const setOpen = (v: string | null) => {
+    setOpenState(v);
+    try {
+      if (v) sessionStorage.setItem("hacko-open-team", v);
+      else sessionStorage.removeItem("hacko-open-team");
+    } catch {}
+  };
+  const term = normalize(q);
+  const match = (r: Row) =>
+    !term || [r.name, r.email, r.skills, r.bio].some((f) => normalize(String(f || "")).includes(term));
+  const teamOf = (r: Row) => teams.find((t) => t.id === r.team_id);
+  const membersOf = (t: Row) =>
+    regs
+      .filter((r) => r.team_id === t.id)
+      .sort((a, b) => (b.user_id === t.leader_id ? 1 : 0) - (a.user_id === t.leader_id ? 1 : 0));
+  const lastWeek = new Date(Date.now() - 7 * 86400000).toISOString();
+  const complete = teams.filter((t) => t.members >= e.team_min).length;
+  const received = teams.filter((t) => t.submission_status && t.submission_status !== "none").length;
+  const withoutTeam = regs.filter((r) => !r.team_id);
+  const incomplete = teams.filter((t) => t.members < e.team_min).length;
+  const notSent = teams.length - received;
+  const deadline = e.submission_deadline || e.ends_at;
+  const exportTeams = () =>
+    downloadCsv("equipes-e-entregas.csv", [
+      [
+        "Equipe",
+        "Formação",
+        "Integrantes",
+        "E-mails",
+        "Entrega",
+        "Link do projeto",
+        "Enviado em",
+        "Comentário",
+      ],
+      ...teams.map((t) => [
+        t.name,
+        formationOf(t, e)[0],
+        membersOf(t)
+          .map((m) => m.name + (m.user_id === t.leader_id ? " (líder)" : ""))
+          .join(", "),
+        membersOf(t)
+          .map((m) => m.email)
+          .join(", "),
+        deliveryOf(t, e)[0],
+        t.submission_url,
+        t.submitted_at ? date(t.submitted_at) : "",
+        t.review_note,
+      ]),
+    ]);
   return (
-    <section className="panel sheet">
-      <div className="sheet-head">
-        <h2>Planilha do evento</h2>
-        <div className="auth-tabs sheet-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "participants"}
-            className={tab === "participants" ? "active" : ""}
-            onClick={() => setTab("participants")}
-          >
-            Participantes ({regs.length})
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "teams"}
-            className={tab === "teams" ? "active" : ""}
-            onClick={() => setTab("teams")}
-          >
-            Equipes ({teams.length})
-          </button>
-        </div>
+    <>
+      <div className="dash-metrics">
+        {[
+          [
+            "Participantes",
+            regs.length,
+            `+${regs.filter((r) => r.created_at > lastWeek).length} nesta semana`,
+          ],
+          ["Equipes", teams.length, `${complete} com formação completa`],
+          ["Entregas recebidas", received, `${notSent} equipes ainda pendentes`],
+          ["Sem equipe", withoutTeam.length, "pessoas aguardando equipe"],
+        ].map(([label, n, hint]) => (
+          <div className="dash-metric" key={label as string}>
+            <small>{label}</small>
+            <strong>{n}</strong>
+            <span>{hint}</span>
+          </div>
+        ))}
       </div>
-      {tab === "participants" ? (
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                {["Nome", "E-mail", "Stack", "Cidade", "Disponibilidade", "Inscrição", "Equipe", "Links"].map(
-                  (x) => (
-                    <th key={x}>{x}</th>
-                  ),
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {regs.map((r) => (
-                <tr key={r.user_id}>
-                  <td>{r.name}</td>
-                  <td>
-                    <a href={"mailto:" + r.email}>{r.email}</a>
-                  </td>
-                  <td>{r.skills}</td>
-                  <td>{r.city}</td>
-                  <td>{r.availability || "Não informada"}</td>
-                  <td>{status(r.status)}</td>
-                  <td>{teamName(r.team_id) || "Sem equipe"}</td>
-                  <td>
-                    {r.linkedin && (
-                      <a href={r.linkedin} target="_blank" rel="noreferrer">
-                        LinkedIn ↗
-                      </a>
-                    )}{" "}
-                    {r.github && (
-                      <a href={r.github} target="_blank" rel="noreferrer">
-                        GitHub ↗
-                      </a>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {!regs.length && (
-                <tr>
-                  <td colSpan={8}>Nenhum inscrito ainda.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+
+      <section className="panel dash-card">
+        <div className="dash-head">
+          <h2>Participantes</h2>
+          <div className="auth-tabs dash-toggle" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "list"}
+              className={view === "list" ? "active" : ""}
+              onClick={() => setView("list")}
+            >
+              Lista (A–Z)
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "teams"}
+              className={view === "teams" ? "active" : ""}
+              onClick={() => setView("teams")}
+            >
+              Por equipe
+            </button>
+          </div>
         </div>
-      ) : (
-        <>
-          <p className="sheet-summary">
-            {delivered} de {teams.length} equipes entregaram · Prazo de entrega:{" "}
-            {date(data.event.submission_deadline || data.event.ends_at)}
-          </p>
+        <input
+          className="dash-search"
+          value={q}
+          onChange={(ev) => setQ(ev.target.value)}
+          placeholder="Buscar por nome, e-mail, stack ou descrição"
+          aria-label="Buscar participantes"
+        />
+        {view === "list" ? (
           <div className="table-scroll">
-            <table>
+            <table className="dash-table">
               <thead>
                 <tr>
-                  {["Equipe", "Integrantes", "Situação", "Entrega", "Projeto", "Enviado em", "Avaliação"].map(
-                    (x) => (
-                      <th key={x}>{x}</th>
-                    ),
-                  )}
+                  {["Nome", "E-mail", "Stack", "Disponibilidade", "Descrição", "Equipe"].map((x) => (
+                    <th key={x}>{x}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {teams.map((t) => (
-                  <tr key={t.id}>
+                {regs.filter(match).map((r) => (
+                  <tr key={r.user_id}>
                     <td>
-                      <b>{t.name}</b>
+                      <b>{r.name}</b>
                     </td>
                     <td>
-                      <ul className="sheet-members">
-                        {regs
-                          .filter((r) => r.team_id === t.id)
-                          .sort(
-                            (a, b) =>
-                              (b.user_id === t.leader_id ? 1 : 0) - (a.user_id === t.leader_id ? 1 : 0),
-                          )
-                          .map((r) => (
-                            <li key={r.user_id}>
-                              {r.name}
-                              {r.user_id === t.leader_id && <span className="pill">Líder</span>}
-                              <br />
-                              <a href={"mailto:" + r.email}>{r.email}</a>
-                            </li>
-                          ))}
-                      </ul>
+                      <a href={"mailto:" + r.email}>{r.email}</a>
+                    </td>
+                    <td>{r.skills}</td>
+                    <td>{r.availability || "Não informada"}</td>
+                    <td>
+                      <div className="dash-bio">{r.bio}</div>
                     </td>
                     <td>
-                      {status(t.status)} · {t.members}/{data.event.team_max}
-                      {t.status === "forming" && <div>{confirmButton(t)}</div>}
-                    </td>
-                    <td>
-                      <DeliveryBadge value={t.submission_status} />
-                    </td>
-                    <td>
-                      {t.submission_url ? (
-                        <>
-                          <a href={t.submission_url} target="_blank" rel="noreferrer">
-                            Abrir projeto ↗
-                          </a>
-                          {t.submission_note && <small className="sheet-note">{t.submission_note}</small>}
-                        </>
+                      {teamOf(r) ? (
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() => {
+                            setOpen(r.team_id);
+                            setTimeout(
+                              () =>
+                                document
+                                  .getElementById("team-" + r.team_id)
+                                  ?.scrollIntoView({ behavior: "smooth", block: "center" }),
+                              50,
+                            );
+                          }}
+                        >
+                          {teamOf(r)!.name}
+                        </button>
                       ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td>{t.submitted_at ? date(t.submitted_at) : "—"}</td>
-                    <td>
-                      <ReviewControl key={t.submission_status} team={t} onSave={onAction} busy={busy} />
-                      {t.review_note && (
-                        <small className="sheet-note">Último comentário: {t.review_note}</small>
+                        <span className="delivery muted">Sem equipe</span>
                       )}
                     </td>
                   </tr>
                 ))}
-                {!teams.length && (
+                {!regs.filter(match).length && (
                   <tr>
-                    <td colSpan={7}>Nenhuma equipe formada ainda.</td>
+                    <td colSpan={6}>Nenhum participante encontrado.</td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
-        </>
+        ) : (
+          <div className="dash-groups">
+            {[...teams, { id: "", name: "Sem equipe", members: withoutTeam.length }].map((t) => {
+              const people = t.id ? membersOf(t).filter(match) : withoutTeam.filter(match);
+              if (term && !people.length) return null;
+              return (
+                <div className="dash-group" key={t.id || "none"}>
+                  <div className="dash-group-head">
+                    <b>{t.name}</b>
+                    <span className="muted">{pessoas(t.id ? membersOf(t).length : withoutTeam.length)}</span>
+                    {t.id ? (
+                      <Badge value={formationOf(t, e)} />
+                    ) : (
+                      <span className="delivery muted">Aguardando</span>
+                    )}
+                  </div>
+                  {people.length ? (
+                    <ul>
+                      {people.map((r) => (
+                        <li key={r.user_id}>
+                          <span>
+                            {r.name}
+                            {r.user_id === t.leader_id && <span className="pill">Líder</span>}
+                          </span>
+                          <a href={"mailto:" + r.email}>{r.email}</a>
+                          <small>{r.skills}</small>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="muted">Ninguém por aqui ainda.</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section className="panel dash-card">
+        <div className="dash-head">
+          <h2>Equipes e entregas</h2>
+          <button type="button" className="secondary" onClick={exportTeams} disabled={!teams.length}>
+            Exportar lista
+          </button>
+        </div>
+        <p className="muted">
+          Prazo de entrega: <b>{date(deadline)}</b> · Clique numa equipe para ver integrantes, entrega e
+          avaliar.
+        </p>
+        <div className="table-scroll">
+          <table className="dash-table dash-teams">
+            <thead>
+              <tr>
+                {["Equipe", "Integrantes", "Formação", "Entrega", "Atualização", ""].map((x) => (
+                  <th key={x}>{x}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {teams.map((t) => {
+                const isOpen = open === t.id;
+                return (
+                  <Fragment key={t.id}>
+                    <tr
+                      id={"team-" + t.id}
+                      className={"dash-row" + (isOpen ? " open" : "")}
+                      onClick={() => setOpen(isOpen ? null : t.id)}
+                    >
+                      <td>
+                        <b>{t.name}</b>
+                      </td>
+                      <td>{pessoas(t.members)}</td>
+                      <td>
+                        <Badge value={formationOf(t, e)} />
+                      </td>
+                      <td>
+                        <Badge value={deliveryOf(t, e)} />
+                      </td>
+                      <td>{relTime(t.reviewed_at || t.submitted_at)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="link-button"
+                          aria-expanded={isOpen}
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            setOpen(isOpen ? null : t.id);
+                          }}
+                        >
+                          {isOpen ? "Fechar" : "Ver detalhes"}
+                        </button>
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr className="dash-detail">
+                        <td colSpan={6}>
+                          <div className="dash-detail-grid">
+                            <div>
+                              <h3>Integrantes</h3>
+                              <ul className="team-members">
+                                {membersOf(t).map((r) => (
+                                  <li key={r.user_id}>
+                                    <b>
+                                      {r.name}
+                                      {r.user_id === t.leader_id && <span className="pill">Líder</span>}
+                                    </b>
+                                    <a href={"mailto:" + r.email}>{r.email}</a>
+                                    <small>
+                                      {[r.skills, r.city, r.availability].filter(Boolean).join(" · ")}
+                                    </small>
+                                  </li>
+                                ))}
+                                {!membersOf(t).length && <li>Nenhum integrante.</li>}
+                              </ul>
+                              {t.status === "forming" && t.members > 0 && confirmButton(t)}
+                            </div>
+                            <div>
+                              <h3>Entrega</h3>
+                              {t.submission_url ? (
+                                <p>
+                                  <a href={t.submission_url} target="_blank" rel="noreferrer">
+                                    Abrir projeto ↗
+                                  </a>
+                                  <br />
+                                  <small>Enviado {relTime(t.submitted_at).toLowerCase()}</small>
+                                  {t.submission_note && (
+                                    <span className="sheet-note">{t.submission_note}</span>
+                                  )}
+                                </p>
+                              ) : (
+                                <p className="muted">A equipe ainda não enviou o projeto.</p>
+                              )}
+                              {t.review_note && (
+                                <p className="sheet-note">Último comentário: {t.review_note}</p>
+                              )}
+                              <ReviewControl
+                                key={t.submission_status}
+                                team={t}
+                                onSave={onAction}
+                                busy={busy}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+              {!teams.length && (
+                <tr>
+                  <td colSpan={6}>Nenhuma equipe formada ainda.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {(incomplete > 0 || notSent > 0 || withoutTeam.length > 0) && (
+        <section className="dash-callout">
+          <h3>Acompanhe antes do prazo</h3>
+          <p>
+            {[
+              incomplete &&
+                `${incomplete} ${incomplete === 1 ? "equipe precisa" : "equipes precisam"} completar a formação.`,
+              notSent && `${notSent} ainda não ${notSent === 1 ? "enviou" : "enviaram"} o projeto.`,
+              withoutTeam.length &&
+                `${withoutTeam.length} ${withoutTeam.length === 1 ? "pessoa está" : "pessoas estão"} sem equipe.`,
+            ]
+              .filter(Boolean)
+              .join(" ")}{" "}
+            Use os status para orientar o acompanhamento.
+          </p>
+        </section>
       )}
-    </section>
+    </>
   );
 }
 // Entrega do projeto na página da equipe: o líder envia o link; todos veem o status e o comentário.
@@ -2474,23 +2717,7 @@ export default function Hacko() {
                 "Arquivar o evento e encerrar novas inscrições?",
               )}
           </div>
-          <div className="metrics">
-            <div className="panel">
-              <small>Inscrições confirmadas</small>
-              <h2>
-                {data.registrations.filter((r: Row) => r.status === "active").length} / {e.capacity}
-              </h2>
-            </div>
-            <div className="panel">
-              <small>Equipes</small>
-              <h2>{data.teams.length}</h2>
-            </div>
-            <div className="panel">
-              <small>Sem equipe</small>
-              <h2>{data.registrations.filter((r: Row) => r.status === "active" && !r.team_id).length}</h2>
-            </div>
-          </div>
-          <EventSheet
+          <EventDashboard
             data={data}
             busy={busy}
             onAction={(b: Row) => mutate(b)}
