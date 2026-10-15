@@ -37,14 +37,14 @@ const localBindingConfig = {
         },
       ]
     : [],
-  r2_buckets: r2
-    ? [
-        {
-          binding: r2,
-          bucket_name: "site-creator-r2",
-        },
-      ]
-    : [],
+  // Arquivos das entregas (fotos e PDFs). Em produção o bucket precisa existir:
+  // npx wrangler r2 bucket create hacko-files
+  r2_buckets: [
+    {
+      binding: r2 || "BUCKET",
+      bucket_name: process.env.HACKO_R2_BUCKET || "hacko-files",
+    },
+  ],
 };
 
 export default defineConfig(async ({ command }) => {

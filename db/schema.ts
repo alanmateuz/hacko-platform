@@ -239,3 +239,17 @@ export const passwordResets = sqliteTable("password_resets", {
   usedAt: text("used_at"),
   createdAt: text("created_at").notNull(),
 });
+// Itens da entrega de uma equipe: arquivos (guardados no R2) ou links.
+export const deliveryItems = sqliteTable("delivery_items", {
+  id: text("id").primaryKey(),
+  teamId: text("team_id")
+    .notNull()
+    .references(() => teams.id),
+  kind: text("kind").notNull(), // "file" ou "link"
+  name: text("name").notNull(),
+  mime: text("mime").notNull().default(""),
+  size: integer("size").notNull().default(0),
+  url: text("url").notNull().default(""),
+  uploadedBy: text("uploaded_by").notNull(),
+  createdAt: text("created_at").notNull(),
+});

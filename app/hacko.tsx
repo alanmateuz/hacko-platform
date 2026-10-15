@@ -1010,9 +1010,9 @@ function PeopleOverview({ data }: { data: Row }) {
 }
 const DELIVERY: Record<string, [string, string]> = {
   none: ["Aguardando envio", "muted"],
-  submitted: ["Enviado", "green"],
-  reviewing: ["Em avaliação", "yellow"],
-  evaluated: ["Avaliado", "lime"],
+  submitted: ["Entrega confirmada · aguardando validação", "blue"],
+  reviewing: ["Em validação", "yellow"],
+  evaluated: ["Validada", "lime"],
   pending: ["Revisar envio", "red"],
 };
 function DeliveryBadge({ value }: { value?: string }) {
@@ -1030,9 +1030,9 @@ function ReviewControl({ team, onSave, busy }: { team: Row; onSave: (body: Row) 
         onChange={(e) => setNext(e.target.value)}
         aria-label={"Novo status de " + team.name}
       >
-        {team.submission_status !== "none" && <option value="reviewing">Em avaliação</option>}
-        {team.submission_status !== "none" && <option value="evaluated">Avaliada</option>}
-        <option value="pending">Pendente (pedir ajustes)</option>
+        {team.submission_status !== "none" && <option value="reviewing">Em validação</option>}
+        {team.submission_status !== "none" && <option value="evaluated">Validar entrega</option>}
+        <option value="pending">Pedir ajustes</option>
       </select>
       <input
         value={note}
@@ -1076,9 +1076,9 @@ function formationOf(t: Row, e: Row): [string, string] {
 // Situação da entrega, considerando o prazo do evento.
 function deliveryOf(t: Row, e: Row): [string, string] {
   const map: Record<string, [string, string]> = {
-    submitted: ["Enviado", "green"],
-    reviewing: ["Em avaliação", "yellow"],
-    evaluated: ["Avaliado", "lime"],
+    submitted: ["Aguardando validação", "blue"],
+    reviewing: ["Em validação", "yellow"],
+    evaluated: ["Validada", "lime"],
     pending: ["Revisar envio", "red"],
   };
   if (map[t.submission_status]) return map[t.submission_status];
@@ -1377,7 +1377,11 @@ function EventDashboard({
                       <td>
                         <Badge value={deliveryOf(t, e)} />
                       </td>
-                      <td>{relTime(t.reviewed_at || t.submitted_at)}</td>
+                      <td>
+                        {relTime(
+                          [t.reviewed_at, t.submitted_at].filter(Boolean).sort().pop() as string | undefined,
+                        )}
+                      </td>
                       <td>
                         <button
                           type="button"
@@ -1417,20 +1421,26 @@ function EventDashboard({
                             </div>
                             <div>
                               <h3>Entrega</h3>
-                              {t.submission_url ? (
-                                <p>
-                                  <a href={t.submission_url} target="_blank" rel="noreferrer">
-                                    Abrir projeto ↗
-                                  </a>
-                                  <br />
-                                  <small>Enviado {relTime(t.submitted_at).toLowerCase()}</small>
-                                  {t.submission_note && (
-                                    <span className="sheet-note">{t.submission_note}</span>
-                                  )}
+                              {t.submission_status === "none" && (
+                                <p className="muted">
+                                  A equipe ainda não confirmou o envio. Itens já anexados aparecem abaixo.
                                 </p>
-                              ) : (
-                                <p className="muted">A equipe ainda não enviou o projeto.</p>
                               )}
+                              <DeliveryItems
+                                items={(data.items || []).filter((i: Row) => i.team_id === t.id)}
+                              />
+                              {t.submission_url &&
+                                !(data.items || []).some((i: Row) => i.url === t.submission_url) && (
+                                  <p>
+                                    <a href={t.submission_url} target="_blank" rel="noreferrer">
+                                      Abrir projeto ↗
+                                    </a>
+                                  </p>
+                                )}
+                              {t.submitted_at && (
+                                <small>Enviado {relTime(t.submitted_at).toLowerCase()}</small>
+                              )}
+                              {t.submission_note && <span className="sheet-note">{t.submission_note}</span>}
                               {t.review_note && (
                                 <p className="sheet-note">Último comentário: {t.review_note}</p>
                               )}
@@ -1478,77 +1488,237 @@ function EventDashboard({
     </>
   );
 }
-// Entrega do projeto na página da equipe: o líder envia o link; todos veem o status e o comentário.
+const fileUrl = (id: string) => "/api/files?id=" + encodeURIComponent(id);
+const sizeLabel = (n: number) =>
+  n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+// Lista dos itens da entrega (fotos, PDFs, links). Fotos aparecem como miniatura.
+function DeliveryItems({ items, onRemove }: { items: Row[]; onRemove?: (item: Row) => void }) {
+  if (!items.length) return <p className="muted">Nenhum item anexado ainda.</p>;
+  return (
+    <ul className="delivery-items">
+      {items.map((i) => {
+        const isImage = i.kind === "file" && i.mime.startsWith("image/");
+        const href = i.kind === "link" ? i.url : fileUrl(i.id);
+        return (
+          <li key={i.id}>
+            <a
+              className="delivery-thumb"
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={"Abrir " + i.name}
+            >
+              {isImage ? (
+                <img src={href} alt="" loading="lazy" />
+              ) : (
+                <span>{i.kind === "link" ? "🔗" : "PDF"}</span>
+              )}
+            </a>
+            <div>
+              <a href={href} target="_blank" rel="noreferrer">
+                {i.name} ↗
+              </a>
+              <small>
+                {[
+                  i.kind === "link" ? "Link" : isImage ? "Foto" : "PDF",
+                  i.size ? sizeLabel(i.size) : "",
+                  i.uploader ? "por " + i.uploader : "",
+                  relTime(i.created_at),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </small>
+            </div>
+            {onRemove && (
+              <button type="button" className="link-button" onClick={() => onRemove(i)}>
+                Remover
+              </button>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+// Entrega do projeto na página da equipe: integrantes anexam fotos, PDFs e links; o líder envia.
 function TeamDelivery({
   team,
   event,
   leader,
+  items,
   busy,
-  onSubmit,
+  onAction,
+  onChanged,
 }: {
   team: Row;
   event: Row;
   leader: boolean;
+  items: Row[];
   busy: boolean;
-  onSubmit: (body: Row) => void;
+  onAction: (body: Row) => Promise<unknown> | void;
+  onChanged: () => void;
 }) {
+  const [uploading, setUploading] = useState("");
+  const [error, setError] = useState("");
+  const [linkOpen, setLinkOpen] = useState(false);
   const nowIso = new Date().toISOString();
   const deadline = event.submission_deadline || event.ends_at;
-  const open = nowIso >= event.starts_at && nowIso <= deadline && team.submission_status !== "evaluated";
+  const canEdit = nowIso >= event.starts_at && nowIso <= deadline && team.submission_status !== "evaluated";
+  const status = team.submission_status || "none";
+  async function upload(files: FileList | null) {
+    if (!files?.length) return;
+    setError("");
+    for (const f of Array.from(files)) {
+      setUploading(`Enviando ${f.name}…`);
+      const r = await fetch(
+        `/api/files?team=${encodeURIComponent(team.id)}&name=${encodeURIComponent(f.name)}`,
+        { method: "POST", headers: { "Content-Type": f.type || "application/octet-stream" }, body: f },
+      );
+      if (!r.ok) {
+        const d = (await r.json().catch(() => ({}))) as Row;
+        setError(`${f.name}: ${d.error || "não foi possível enviar."}`);
+        break;
+      }
+    }
+    setUploading("");
+    onChanged();
+  }
   return (
-    <section className="panel section">
+    <section className="panel section delivery-panel">
       <div className="section-head">
         <h2>Entrega do projeto</h2>
-        <DeliveryBadge value={team.submission_status} />
+        <DeliveryBadge value={status} />
       </div>
       <p>
         Prazo: <b>{date(deadline)}</b>
-        {team.submitted_at && <> · Enviado em {date(team.submitted_at)}</>}
+        {team.submitted_at && <> · Enviado {relTime(team.submitted_at).toLowerCase()}</>}
       </p>
-      {team.submission_url && (
+      {status === "submitted" && (
+        <p className="notice">✓ Entrega confirmada. Aguardando a validação da organização do evento.</p>
+      )}
+      {status === "reviewing" && <p className="notice">A organização está validando a entrega.</p>}
+      {status === "evaluated" && <p className="notice">✓ Entrega validada pela organização.</p>}
+      {status === "pending" && (
+        <p className="alert">A organização pediu ajustes. Atualize os anexos e envie de novo.</p>
+      )}
+      {team.review_note && <p className="notice">Comentário da organização: {team.review_note}</p>}
+
+      <h3>Anexos</h3>
+      <DeliveryItems
+        items={items}
+        onRemove={
+          canEdit
+            ? (i) => {
+                if (confirm(`Remover "${i.name}" da entrega?`))
+                  onAction({ op: "delivery.remove", id: team.id, itemId: i.id });
+              }
+            : undefined
+        }
+      />
+      {team.submission_url && !items.some((i) => i.url === team.submission_url) && (
         <p>
           <a href={team.submission_url} target="_blank" rel="noreferrer">
             {team.submission_url} ↗
           </a>
-          {team.submission_note && (
-            <>
-              <br />
-              <small>{team.submission_note}</small>
-            </>
-          )}
         </p>
       )}
-      {team.review_note && <p className="notice">Comentário da organização: {team.review_note}</p>}
-      {leader && open ? (
-        <form
-          className="form wide"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const f = Object.fromEntries(new FormData(e.currentTarget)) as Row;
-            onSubmit({ op: "team.submit", id: team.id, url: f.url, note: f.note });
-          }}
-        >
-          <label>
-            Link do projeto (GitHub, vídeo, Figma, site…)
-            <input name="url" type="url" required pattern="https://.*" defaultValue={team.submission_url} />
-          </label>
-          <label>
-            Descrição curta (opcional)
-            <textarea name="note" maxLength={1000} defaultValue={team.submission_note} />
-          </label>
-          <button type="submit" disabled={busy}>
-            {team.submission_url ? "Atualizar entrega" : "Enviar entrega"}
-          </button>
-        </form>
+
+      {canEdit ? (
+        <>
+          <div className="attach-buttons">
+            <label className="button secondary file-button">
+              📷 Anexar fotos
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                disabled={!!uploading}
+                onChange={(ev) => {
+                  upload(ev.target.files);
+                  ev.target.value = "";
+                }}
+              />
+            </label>
+            <label className="button secondary file-button">
+              📄 Anexar PDF
+              <input
+                type="file"
+                accept="application/pdf"
+                multiple
+                disabled={!!uploading}
+                onChange={(ev) => {
+                  upload(ev.target.files);
+                  ev.target.value = "";
+                }}
+              />
+            </label>
+            <button type="button" className="secondary" onClick={() => setLinkOpen(!linkOpen)}>
+              🔗 Adicionar link
+            </button>
+          </div>
+          <small className="muted">
+            Fotos (JPG, PNG, WebP) e PDFs de até 20 MB · até 10 itens por entrega.
+          </small>
+          {uploading && <p className="notice">{uploading}</p>}
+          {error && (
+            <p className="alert" role="alert">
+              {error}
+            </p>
+          )}
+          {linkOpen && (
+            <form
+              className="form wide link-form"
+              onSubmit={async (ev) => {
+                ev.preventDefault();
+                const f = Object.fromEntries(new FormData(ev.currentTarget)) as Row;
+                await onAction({ op: "delivery.link", id: team.id, url: f.url, name: f.name });
+                setLinkOpen(false);
+              }}
+            >
+              <label>
+                Link (GitHub, vídeo, Figma, site…)
+                <input name="url" type="url" required pattern="https://.*" placeholder="https://" />
+              </label>
+              <label>
+                Nome (opcional)
+                <input name="name" maxLength={120} placeholder="Ex.: Repositório, Vídeo de apresentação" />
+              </label>
+              <button type="submit" disabled={busy}>
+                Adicionar link
+              </button>
+            </form>
+          )}
+          {leader ? (
+            <form
+              className="form wide submit-form"
+              onSubmit={(ev) => {
+                ev.preventDefault();
+                const f = Object.fromEntries(new FormData(ev.currentTarget)) as Row;
+                onAction({ op: "team.submit", id: team.id, note: f.note });
+              }}
+            >
+              <label>
+                Mensagem para a organização (opcional)
+                <textarea name="note" maxLength={1000} defaultValue={team.submission_note} />
+              </label>
+              <button type="submit" disabled={busy || !items.length}>
+                {status === "none" ? "Enviar entrega" : "Reenviar entrega"}
+              </button>
+              {!items.length && (
+                <small className="muted">Anexe pelo menos uma foto, PDF ou link para enviar.</small>
+              )}
+            </form>
+          ) : (
+            <small className="muted">Todos podem anexar; o líder da equipe confirma o envio.</small>
+          )}
+        </>
       ) : (
-        <small>
+        <small className="muted">
           {nowIso < event.starts_at
             ? "As entregas abrem no início do evento."
             : nowIso > deadline
               ? "O prazo de entrega terminou."
-              : team.submission_status === "evaluated"
-                ? "A entrega já foi avaliada."
-                : "Apenas o líder da equipe envia a entrega."}
+              : "A entrega já foi validada."}
         </small>
       )}
     </section>
@@ -2550,8 +2720,10 @@ export default function Hacko() {
               team={t}
               event={data.event}
               leader={leader}
+              items={data.items || []}
               busy={busy}
-              onSubmit={(b: Row) => mutate(b)}
+              onAction={(b: Row) => mutate(b)}
+              onChanged={() => load()}
             />
           )}
           <div className="two-col">

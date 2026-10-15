@@ -73,8 +73,29 @@ function compiled(path, imports) {
   return mod.exports;
 }
 const validation = compiled("../lib/validation.ts", {});
+// R2 em memória para os arquivos das entregas.
+const r2 = new Map();
+const bucket = {
+  async put(key, bytes, opts) {
+    r2.set(key, { bytes, type: opts && opts.httpMetadata && opts.httpMetadata.contentType });
+  },
+  async get(key) {
+    const o = r2.get(key);
+    return o ? { body: o.bytes } : null;
+  },
+  async delete(keys) {
+    for (const k of [].concat(keys)) r2.delete(k);
+  },
+  async list({ prefix }) {
+    return { objects: [...r2.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key })) };
+  },
+};
+const deliveries = compiled("../lib/deliveries.ts", {
+  "cloudflare:workers": { env: { DB: db, BUCKET: bucket } },
+});
 const api = compiled("../app/api/hacko/route.ts", {
-  "cloudflare:workers": { env: { DB: db } },
+  "cloudflare:workers": { env: { DB: db, BUCKET: bucket } },
+  "../../../lib/deliveries": deliveries,
   "../../session": { getCurrentUser: async () => user },
   "../../../lib/auth": {
     enabledProviders: () => ["google", "github", "linkedin"],
@@ -652,7 +673,7 @@ test("entregas: líder envia, organização avalia", async () => {
   );
   assert.ok(
     sql
-      .prepare("SELECT 1 FROM notifications WHERE user_id='carol' AND message LIKE '%foi avaliada%Ótimo!%'")
+      .prepare("SELECT 1 FROM notifications WHERE user_id='carol' AND message LIKE '%foi validada%Ótimo!%'")
       .get(),
   );
   const sheet = (await get("manage", "ev-sub")).body.teams.find((t) => t.id === "t-sub");
@@ -687,4 +708,96 @@ test("equipes: minha equipe no evento, mínimo para entregar e confirmação ap�
   sql.exec("UPDATE teams SET status='forming' WHERE id='t-sub'");
   as("owner");
   assert.equal((await post({ op: "team.confirm", id: "t-sub" })).status, 200);
+});
+
+test("entregas: anexos (fotos, PDF, links), envio e validação", async () => {
+  const origin = "https://hacko.test";
+  const upload = (team, name, type, bytes) =>
+    deliveries.uploadFile(
+      new Request(`${origin}/api/files?team=${team}&name=${encodeURIComponent(name)}`, {
+        method: "POST",
+        headers: { origin, "content-type": type },
+        body: bytes,
+      }),
+      user ? user.userId : "",
+    );
+  // equipe nova: líder "lia" e integrante "erin"
+  for (const id of ["lia", "erin"]) {
+    sql.exec(
+      `INSERT OR IGNORE INTO profiles(id,name,email,visible) VALUES('${id}','${id}','${id}@example.test',1)`,
+    );
+    sql.exec(
+      `INSERT INTO registrations(event_id,user_id,status,created_at) VALUES('ev-sub','${id}','active','${day(-2)}')`,
+    );
+  }
+  sql.exec(
+    "INSERT INTO teams(id,event_id,name,leader_id,status,skills,description) VALUES('t-files','ev-sub','Equipe Arquivos','lia','forming','','')",
+  );
+  sql.exec(
+    "INSERT INTO team_members(team_id,event_id,user_id) VALUES('t-files','ev-sub','lia'),('t-files','ev-sub','erin')",
+  );
+  const pdf = new TextEncoder().encode("%PDF-1.4 conteúdo de teste");
+  // integrante (não líder) anexa PDF e link; tipo falso é recusado; fora da equipe não anexa
+  as("erin");
+  assert.equal((await upload("t-files", "proposta.pdf", "application/pdf", pdf)).status, 200);
+  assert.equal(
+    (await upload("t-files", "falso.pdf", "application/pdf", new TextEncoder().encode("<html>"))).status,
+    400,
+  );
+  assert.equal(
+    (await upload("t-files", "script.html", "text/html", new TextEncoder().encode("<html>"))).status,
+    415,
+  );
+  assert.equal(
+    (
+      await post({
+        op: "delivery.link",
+        id: "t-files",
+        url: "https://github.com/x/arquivos",
+        name: "Repositório",
+      })
+    ).status,
+    200,
+  );
+  assert.equal((await post({ op: "delivery.link", id: "t-files", url: "javascript:alert(1)" })).status, 400);
+  as("bob");
+  assert.equal((await upload("t-files", "intruso.pdf", "application/pdf", pdf)).status, 403);
+  // só integrantes e a organização veem os arquivos
+  const fileId = sql
+    .prepare("SELECT id FROM delivery_items WHERE team_id='t-files' AND kind='file'")
+    .get().id;
+  const download = (id) =>
+    deliveries.downloadFile(new Request(`${origin}/api/files?id=${id}`), user ? user.userId : null);
+  assert.equal((await download(fileId)).status, 403);
+  as("owner");
+  const got = await download(fileId);
+  assert.equal(got.status, 200);
+  assert.equal(got.headers.get("content-type"), "application/pdf");
+  // líder envia: aguardando validação; organização valida
+  as("erin");
+  assert.equal((await post({ op: "team.submit", id: "t-files" })).status, 403);
+  as("lia");
+  const team = (await get("team", "t-files")).body;
+  assert.equal(team.items.length, 2);
+  assert.equal((await post({ op: "team.submit", id: "t-files", note: "Versão final" })).status, 200);
+  assert.ok(
+    sql
+      .prepare("SELECT 1 FROM notifications WHERE user_id='erin' AND message LIKE '%Aguardando validação%'")
+      .get(),
+  );
+  as("owner");
+  assert.equal((await get("manage", "ev-sub")).body.items.filter((i) => i.team_id === "t-files").length, 2);
+  assert.equal((await post({ op: "team.review", id: "t-files", status: "evaluated" })).status, 200);
+  // depois de validada, ninguém altera
+  as("erin");
+  assert.equal((await post({ op: "delivery.remove", id: "t-files", itemId: fileId })).status, 409);
+  assert.equal((await upload("t-files", "tarde.pdf", "application/pdf", pdf)).status, 409);
+  // dissolver a equipe remove itens e arquivos
+  sql.exec("UPDATE teams SET submission_status='none' WHERE id='t-files'");
+  sql.exec("UPDATE events SET starts_at='" + day(1) + "' WHERE id='ev-sub'");
+  as("lia");
+  assert.equal((await post({ op: "team.dissolve", id: "t-files", confirm: true })).status, 200);
+  assert.equal(sql.prepare("SELECT count(*) n FROM delivery_items WHERE team_id='t-files'").get().n, 0);
+  assert.ok(![...r2.keys()].some((k) => k.startsWith("deliveries/t-files/")));
+  sql.exec("UPDATE events SET starts_at='" + day(-1) + "' WHERE id='ev-sub'");
 });
