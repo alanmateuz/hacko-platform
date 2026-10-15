@@ -681,6 +681,95 @@ function LoginOptions({ providers, passwordReset }: { providers: string[]; passw
     </div>
   );
 }
+// Sino de notificações do cabeçalho: mostra as não lidas e abre um mini painel com as mais recentes.
+function NotificationBell({ items, onMarkRead }: { items: Row[]; onMarkRead: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const unread = items.filter((n) => !n.read).length;
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  useEffect(() => {
+    const close = () => setOpen(false);
+    window.addEventListener("hashchange", close);
+    return () => window.removeEventListener("hashchange", close);
+  }, []);
+  return (
+    <div className="notif" ref={ref}>
+      <button
+        type="button"
+        className="notif-button"
+        aria-label={unread ? `Notificações: ${unread} não lidas` : "Notificações"}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => setOpen(!open)}
+      >
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          aria-hidden="true"
+        >
+          <path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+          <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+        </svg>
+        {unread > 0 && <span className="notif-badge">{unread > 9 ? "9+" : unread}</span>}
+      </button>
+      {open && (
+        <div className="notif-panel" role="dialog" aria-label="Notificações">
+          <div className="notif-head">
+            <b>Notificações</b>
+            {unread > 0 && (
+              <button
+                type="button"
+                className="link-button"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  await onMarkRead();
+                  setBusy(false);
+                }}
+              >
+                Marcar como lidas
+              </button>
+            )}
+          </div>
+          {items.length ? (
+            <ul>
+              {items.slice(0, 8).map((n) => (
+                <li key={n.id} className={n.read ? "" : "unread"}>
+                  <span>{n.message}</span>
+                  <small>{date(n.created_at)}</small>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="notif-empty">Nenhuma novidade por enquanto.</p>
+          )}
+          {items.length > 8 && (
+            <a className="notif-all" href="#/profile">
+              Ver todas no perfil →
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 function Card({ e }: any) {
   const closed = e.closes_at <= new Date().toISOString();
   return (
@@ -1861,9 +1950,27 @@ export default function Hacko() {
             </a>
           ))}
         </nav>
-        <a className="account-link" href={boot?.user ? "#/profile" : "#/login"}>
-          {shortName(boot?.profile?.name || boot?.user?.name) || "Minha conta"} ↗
-        </a>
+        <div className="header-actions">
+          {boot?.user && (
+            <NotificationBell
+              items={boot.notifications || []}
+              onMarkRead={async () => {
+                await fetch("/api/hacko", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ op: "notifications.read" }),
+                });
+                // Atualiza só a lista local, sem recarregar a página inteira.
+                setBoot(
+                  (b) => b && { ...b, notifications: b.notifications.map((n: Row) => ({ ...n, read: 1 })) },
+                );
+              }}
+            />
+          )}
+          <a className="account-link" href={boot?.user ? "#/profile" : "#/login"}>
+            {shortName(boot?.profile?.name || boot?.user?.name) || "Minha conta"} ↗
+          </a>
+        </div>
         <div className="mobile-tabs">
           <a href="#/">Explorar</a>
           <a href="#/mine">Meus hackathons</a>
