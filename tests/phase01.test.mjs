@@ -138,7 +138,10 @@ test("fase 01: autenticação, isolamento e jornada de evento/equipe", async () 
   }
   // participante sem organização não cria uma: precisa ser conta de empresa
   as("alice");
-  assert.equal((await post({ op: "organization", data: { name: "Empresa da Alice", description: "" } })).status, 403);
+  assert.equal(
+    (await post({ op: "organization", data: { name: "Empresa da Alice", description: "" } })).status,
+    403,
+  );
   companies.add("owner");
   as("owner");
   org = (await post({ op: "organization", data: { name: "Organização teste", description: "" } })).body.id;
@@ -564,7 +567,10 @@ test("empresa: cadastro, perfil da empresa, logo e restrições", async () => {
     contact_name: "Ana Lima",
     contact_role: "RH",
   };
-  assert.equal((await post({ op: "organization.update", id: org.id, data: { ...data, cnpj: "123" } })).status, 400);
+  assert.equal(
+    (await post({ op: "organization.update", id: org.id, data: { ...data, cnpj: "123" } })).status,
+    400,
+  );
   assert.equal((await post({ op: "organization.update", id: org.id, data })).status, 200);
   assert.equal(sql.prepare("SELECT name FROM users WHERE id=?").get(acme.id).name, "Acme Tecnologia");
   const png =
@@ -595,4 +601,56 @@ test("empresa: cadastro, perfil da empresa, logo e restrições", async () => {
   as("alice");
   assert.equal((await post({ op: "organization.update", id: org.id, data })).status, 403);
   assert.equal((await post({ op: "image.upload", kind: "logo", id: org.id, data: png })).status, 403);
+});
+
+test("entregas: líder envia, organização avalia", async () => {
+  const cols = sql
+    .prepare(
+      "SELECT name FROM pragma_table_info('events') WHERE name NOT IN ('id','starts_at','ends_at','submission_deadline')",
+    )
+    .all()
+    .map((c) => c.name)
+    .join(",");
+  sql.exec(
+    `INSERT INTO events(id,starts_at,ends_at,submission_deadline,${cols}) SELECT 'ev-sub','${day(-1)}','${day(1)}','',${cols} FROM events WHERE id='${event}'`,
+  );
+  sql.exec(
+    "INSERT INTO teams(id,event_id,name,leader_id,status,skills,description) VALUES('t-sub','ev-sub','Equipe Entrega','bob','confirmed','','')",
+  );
+  sql.exec(
+    "INSERT INTO team_members(team_id,event_id,user_id) VALUES('t-sub','ev-sub','bob'),('t-sub','ev-sub','carol')",
+  );
+  as("carol");
+  assert.equal((await post({ op: "team.submit", id: "t-sub", url: "https://github.com/x/y" })).status, 403);
+  as("bob");
+  assert.equal((await post({ op: "team.submit", id: "t-sub", url: "javascript:alert(1)" })).status, 400);
+  assert.equal(
+    (await post({ op: "team.submit", id: "t-sub", url: "https://github.com/x/y", note: "Protótipo" })).status,
+    200,
+  );
+  const sent = sql
+    .prepare("SELECT submission_status,submission_url,submitted_at FROM teams WHERE id='t-sub'")
+    .get();
+  assert.equal(sent.submission_status, "submitted");
+  assert.ok(sent.submitted_at);
+  // só a organização do evento avalia
+  as("alice");
+  assert.notEqual((await post({ op: "team.review", id: "t-sub", status: "evaluated" })).status, 200);
+  as("owner");
+  assert.equal((await post({ op: "team.review", id: "t-sub", status: "aprovadissima" })).status, 400);
+  assert.equal(
+    (await post({ op: "team.review", id: "t-sub", status: "evaluated", note: "Ótimo!" })).status,
+    200,
+  );
+  assert.ok(
+    sql
+      .prepare("SELECT 1 FROM notifications WHERE user_id='carol' AND message LIKE '%foi avaliada%Ótimo!%'")
+      .get(),
+  );
+  const sheet = (await get("manage", "ev-sub")).body.teams.find((t) => t.id === "t-sub");
+  assert.equal(sheet.submission_status, "evaluated");
+  assert.equal(sheet.leader_name, "bob");
+  // depois de avaliada, a equipe não altera mais a entrega
+  as("bob");
+  assert.equal((await post({ op: "team.submit", id: "t-sub", url: "https://github.com/x/z" })).status, 409);
 });
