@@ -2,7 +2,9 @@
 // Sessions are random tokens kept in an HttpOnly cookie; only their SHA-256 is stored in D1.
 import { env } from "cloudflare:workers";
 
-export type AuthUser = { userId: string; email: string; displayName: string };
+export type AccountType = "participant" | "company";
+export type AuthUser = { userId: string; email: string; displayName: string; accountType: AccountType };
+const accountTypeOf = (v: unknown): AccountType => (v === "company" ? "company" : "participant");
 export type Provider = "google" | "github" | "linkedin";
 
 const SESSION_COOKIE = "hacko_session";
@@ -56,11 +58,18 @@ export async function userFromCookieHeader(cookieHeader: string | null): Promise
   if (!token || !env.DB) return null;
   const row = await db()
     .prepare(
-      "SELECT u.id,u.email,u.name FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=? AND s.expires_at>?",
+      "SELECT u.id,u.email,u.name,u.account_type FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.id=? AND s.expires_at>?",
     )
     .bind(await sha256(token), now())
-    .first<{ id: string; email: string; name: string }>();
-  return row ? { userId: row.id, email: row.email, displayName: row.name || row.email } : null;
+    .first<{ id: string; email: string; name: string; account_type: string }>();
+  return row
+    ? {
+        userId: row.id,
+        email: row.email,
+        displayName: row.name || row.email,
+        accountType: accountTypeOf(row.account_type),
+      }
+    : null;
 }
 
 async function startSession(userId: string, request: Request, returnTo: string) {
@@ -90,10 +99,40 @@ export async function logout(request: Request) {
   });
 }
 
+// Linhas criadas junto com uma conta nova. Empresas já nascem com perfil interno (oculto) e organização.
+function newAccountStatements(
+  userId: string,
+  email: string,
+  name: string,
+  type: AccountType,
+  passwordHash: string | null,
+  verified: number,
+) {
+  const stmts = [
+    db()
+      .prepare(
+        "INSERT INTO users(id,email,name,password_hash,email_verified,account_type,created_at) VALUES(?,?,?,?,?,?,?)",
+      )
+      .bind(userId, email, name.slice(0, 160), passwordHash, verified, type, now()),
+  ];
+  if (type === "company") {
+    const orgId = crypto.randomUUID();
+    stmts.push(
+      db()
+        .prepare("INSERT INTO profiles(id,name,email,visible) VALUES(?,?,?,0)")
+        .bind(userId, name.slice(0, 160), email),
+      db()
+        .prepare("INSERT INTO organizations(id,name,owner_id,description) VALUES(?,?,?,'')")
+        .bind(orgId, name.slice(0, 160), userId),
+    );
+  }
+  return stmts;
+}
+
 // Finds the account for a provider identity, linking by verified e-mail, or creates it.
 // Contas criadas com senha não têm e-mail verificado: se o dono real do e-mail entrar por um provedor,
 // a senha anterior e as sessões abertas são invalidadas (impede sequestro de conta por pré-cadastro).
-async function upsertUser(provider: string, subject: string, email: string, name: string) {
+async function upsertUser(provider: string, subject: string, email: string, name: string, type: AccountType) {
   email = email.trim().toLowerCase();
   const linked = await db()
     .prepare("SELECT user_id FROM identities WHERE provider=? AND subject=?")
@@ -113,11 +152,7 @@ async function upsertUser(provider: string, subject: string, email: string, name
             db().prepare("UPDATE users SET password_hash=NULL,email_verified=1 WHERE id=?").bind(userId),
             db().prepare("DELETE FROM sessions WHERE user_id=?").bind(userId),
           ]
-      : [
-          db()
-            .prepare("INSERT INTO users(id,email,name,email_verified,created_at) VALUES(?,?,?,1,?)")
-            .bind(userId, email, name.slice(0, 160), now()),
-        ]),
+      : newAccountStatements(userId, email, name, type, null, 1)),
     db()
       .prepare("INSERT OR IGNORE INTO identities(provider,subject,user_id) VALUES(?,?,?)")
       .bind(provider, subject, userId),
@@ -191,6 +226,7 @@ async function oauthFlow(provider: Provider, request: Request, popup: boolean) {
     if (url.searchParams.get("error")) return loginError("cancelado");
     const state = randomToken(16);
     const returnTo = safeReturn(url.searchParams.get("return_to"));
+    const type = accountTypeOf(url.searchParams.get("account_type"));
     const auth = new URL(p.authorize);
     auth.search = new URLSearchParams({
       client_id: clientId,
@@ -201,10 +237,12 @@ async function oauthFlow(provider: Provider, request: Request, popup: boolean) {
       ...(provider === "google" ? { prompt: "select_account" } : {}),
     }).toString();
     return redirect(auth.toString(), [
-      cookie(STATE_COOKIE, state + "|" + returnTo + (popup ? "|1" : ""), request, 600),
+      cookie(STATE_COOKIE, [state, returnTo, popup ? "1" : "0", type].join("|"), request, 600),
     ]);
   }
-  const [expected, returnTo] = (readCookie(request.headers.get("cookie"), STATE_COOKIE) || "").split("|");
+  const [expected, returnTo, , chosenType] = (
+    readCookie(request.headers.get("cookie"), STATE_COOKIE) || ""
+  ).split("|");
   if (!expected || expected !== url.searchParams.get("state")) return loginError("sessao_expirada");
   try {
     const tokenRes = await fetch(p.token, {
@@ -253,7 +291,7 @@ async function oauthFlow(provider: Provider, request: Request, popup: boolean) {
         u.email_verified === true || u.email_verified === "true" || (provider === "linkedin" && !!email);
     }
     if (!subject || !email || !verified) return loginError("email_nao_verificado");
-    const userId = await upsertUser(provider, subject, email, name);
+    const userId = await upsertUser(provider, subject, email, name, accountTypeOf(chosenType));
     return startSession(userId, request, safeReturn(returnTo));
   } catch (e) {
     console.error("OAuth error", provider, (e as Error)?.name);
@@ -308,20 +346,28 @@ async function credentials(request: Request) {
   const name = String(body.name || "")
     .trim()
     .replace(/\s+/g, " ");
-  return { email, password, name };
+  return { email, password, name, type: accountTypeOf(body.account_type) };
 }
 async function sessionResponse(userId: string, request: Request) {
   const r = await startSession(userId, request, "/");
   const headers = new Headers({ "Content-Type": "application/json", "Cache-Control": "no-store" });
   for (const c of r.headers.getSetCookie()) headers.append("Set-Cookie", c);
-  return new Response(JSON.stringify({ ok: true }), { headers });
+  const acc = await db()
+    .prepare("SELECT account_type FROM users WHERE id=?")
+    .bind(userId)
+    .first<{ account_type: string }>();
+  return new Response(JSON.stringify({ ok: true, accountType: accountTypeOf(acc?.account_type) }), {
+    headers,
+  });
 }
 
 // POST /api/auth/signup {name, email, password}
 export async function signup(request: Request) {
   const c = await credentials(request);
   if (c instanceof Response) return c;
-  if (c.name.length > 160 || c.name.split(" ").filter((w) => w.length > 0).length < 2)
+  if (c.type === "company") {
+    if (c.name.length < 2 || c.name.length > 160) return fail("Informe o nome da empresa.", 400);
+  } else if (c.name.length > 160 || c.name.split(" ").filter((w) => w.length > 0).length < 2)
     return fail("Informe seu nome e sobrenome.", 400);
   const weak = passwordProblems(c.password);
   if (weak.length) return fail("A senha precisa ter " + weak.join(", ") + ".", 400);
@@ -329,10 +375,9 @@ export async function signup(request: Request) {
     return fail("Este e-mail já tem conta. Entre com sua senha ou pelo Google, GitHub ou LinkedIn.", 409);
   const userId = crypto.randomUUID();
   try {
-    await db()
-      .prepare("INSERT INTO users(id,email,name,password_hash,email_verified,created_at) VALUES(?,?,?,?,0,?)")
-      .bind(userId, c.email, c.name, await hashPassword(c.password), now())
-      .run();
+    await db().batch(
+      newAccountStatements(userId, c.email, c.name, c.type, await hashPassword(c.password), 0),
+    );
   } catch (e) {
     if (String((e as Error)?.message).includes("UNIQUE")) return fail("Este e-mail já tem conta.", 409);
     throw e;

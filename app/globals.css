@@ -1270,3 +1270,60 @@ button.danger:disabled {
     width: auto;
   }
 }
+
+.role-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.role-switch button {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 14px 16px;
+  background: var(--white);
+  color: var(--ink);
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  box-shadow: none;
+}
+.role-switch button small {
+  color: var(--muted);
+  font-weight: 400;
+}
+.role-switch button.active {
+  border-color: var(--blue);
+  background: #f4f8ff;
+}
+.header-logo {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  object-fit: cover;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+.org-logo {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  object-fit: cover;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+.people-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 16px;
+  margin: 20px 0;
+}
+.people-tabs {
+  max-width: 420px;
+  margin-bottom: 16px;
+}
+@media (max-width: 720px) {
+  .people-filters {
+    grid-template-columns: 1fr;
+  }
+}

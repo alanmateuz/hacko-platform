@@ -20,6 +20,14 @@ export const organizations = sqliteTable("organizations", {
     .notNull()
     .references(() => profiles.id),
   description: text("description").notNull().default(""),
+  // Perfil da empresa (contas do tipo "company").
+  website: text("website").notNull().default(""),
+  cnpj: text("cnpj").notNull().default(""),
+  city: text("city").notNull().default(""),
+  linkedin: text("linkedin").notNull().default(""),
+  instagram: text("instagram").notNull().default(""),
+  contactName: text("contact_name").notNull().default(""),
+  contactRole: text("contact_role").notNull().default(""),
 });
 export const events = sqliteTable("events", {
   id: text("id").primaryKey(),
@@ -181,6 +189,8 @@ export const users = sqliteTable("users", {
   passwordHash: text("password_hash"),
   // 1 quando o e-mail foi confirmado por um provedor OAuth.
   emailVerified: integer("email_verified").notNull().default(0),
+  // "participant" (participa de hackathons) ou "company" (só organiza).
+  accountType: text("account_type").notNull().default("participant"),
   createdAt: text("created_at").notNull(),
 });
 // Linked sign-in methods: provider = google | github | linkedin | email.
