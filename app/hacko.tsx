@@ -365,8 +365,8 @@ const PROVIDER_ICONS: Record<string, ReactNode> = {
   ),
 };
 // Google abre o seletor de contas em uma janela pop-up; GitHub e LinkedIn levam ao site do provedor.
-function startProviderLogin(p: string, returnTo: string) {
-  const url = `/api/auth/${p}?return_to=${encodeURIComponent(returnTo)}`;
+function startProviderLogin(p: string, returnTo: string, accountType = "participant") {
+  const url = `/api/auth/${p}?return_to=${encodeURIComponent(returnTo)}&account_type=${accountType}`;
   if (p !== "google") return (location.href = url);
   const w = 480,
     h = 640;
@@ -547,11 +547,39 @@ function LoginOptions({ providers, passwordReset }: { providers: string[]; passw
   const [state, setState] = useState<{ error?: string; busy?: boolean }>({});
   const [password, setPassword] = useState("");
   const [forgot, setForgot] = useState(false);
+  const [role, setRole] = useState<"participant" | "company">(
+    location.hash.includes("empresa") ? "company" : "participant",
+  );
+  const company = role === "company";
+  const home = company ? "/company" : "/profile";
   const urlError = new URLSearchParams(location.hash.split("?")[1] || "").get("erro");
   const signup = mode === "signup";
   if (forgot) return <ForgotPassword onBack={() => setForgot(false)} />;
   return (
     <div className="login-options">
+      <div className="role-switch" role="radiogroup" aria-label="Tipo de conta">
+        {(
+          [
+            ["participant", "Sou participante", "Quero participar de hackathons"],
+            ["company", "Sou uma empresa", "Quero organizar hackathons"],
+          ] as const
+        ).map(([value, label, hint]) => (
+          <button
+            key={value}
+            type="button"
+            role="radio"
+            aria-checked={role === value}
+            className={role === value ? "active" : ""}
+            onClick={() => {
+              setRole(value);
+              setState({});
+            }}
+          >
+            <b>{label}</b>
+            <small>{hint}</small>
+          </button>
+        ))}
+      </div>
       <div className="auth-tabs" role="tablist">
         {(["login", "signup"] as const).map((m) => (
           <button
@@ -587,23 +615,29 @@ function LoginOptions({ providers, passwordReset }: { providers: string[]; passw
           const r = await fetch("/api/auth/" + mode, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: f.name, email: f.email, password: f.password }),
+            body: JSON.stringify({ name: f.name, email: f.email, password: f.password, account_type: role }),
           });
           const d = (await r.json().catch(() => ({}))) as Row;
           if (!r.ok) return setState({ error: d.error || "Não foi possível continuar." });
-          // Depois de entrar, o perfil é completado na própria Hacko.
-          location.hash = "/profile";
+          // Depois de entrar, o perfil (de participante ou da empresa) é completado na própria Hacko.
+          location.hash = d.accountType === "company" ? "/company" : "/profile";
           location.reload();
         }}
       >
         {signup && (
           <label>
-            Nome e sobrenome
-            <input name="name" required minLength={2} maxLength={160} autoComplete="name" />
+            {company ? "Nome da empresa" : "Nome e sobrenome"}
+            <input
+              name="name"
+              required
+              minLength={2}
+              maxLength={160}
+              autoComplete={company ? "organization" : "name"}
+            />
           </label>
         )}
         <label>
-          E-mail
+          {company ? "E-mail da empresa" : "E-mail"}
           <input name="email" type="email" required autoComplete="email" />
         </label>
         <label>
@@ -642,7 +676,7 @@ function LoginOptions({ providers, passwordReset }: { providers: string[]; passw
                 key={p}
                 type="button"
                 className={"provider " + p}
-                onClick={() => startProviderLogin(p, "/#/profile")}
+                onClick={() => startProviderLogin(p, "/#" + home, role)}
               >
                 {PROVIDER_ICONS[p]}
                 <span>{PROVIDER_LABEL[p]}</span>
@@ -770,6 +804,210 @@ function NotificationBell({ items, onMarkRead }: { items: Row[]; onMarkRead: () 
     </div>
   );
 }
+// Participantes e equipes de todos os hackathons da organização, com filtro por evento e busca.
+function PeopleOverview({ data }: { data: Row }) {
+  const [tab, setTab] = useState<"participants" | "teams">("participants");
+  const [eventId, setEventId] = useState("");
+  const [q, setQ] = useState("");
+  const events: Row[] = data.events || [];
+  const term = normalize(q);
+  const match = (...fields: unknown[]) =>
+    !term || fields.some((f) => normalize(String(f || "")).includes(term));
+  const people = (data.participants || []).filter(
+    (p: Row) => (!eventId || p.event_id === eventId) && match(p.name, p.email, p.skills, p.city, p.team_name),
+  );
+  const teams = (data.teams || []).filter(
+    (t: Row) =>
+      (!eventId || t.event_id === eventId) && match(t.name, t.skills, t.member_names, t.leader_name),
+  );
+  const withoutTeam = people.filter((p: Row) => !p.team_id).length;
+  const exportCsv = () => {
+    const cell = (v: unknown) => '"' + String(v ?? "").replace(/"/g, '""') + '"';
+    const rows = [
+      ["Hackathon", "Nome", "E-mail", "Stack", "Cidade", "Disponibilidade", "Equipe", "LinkedIn", "GitHub"],
+      ...people.map((p: Row) => [
+        p.event_title,
+        p.name,
+        p.email,
+        p.skills,
+        p.city,
+        p.availability,
+        p.team_name || "Sem equipe",
+        p.linkedin,
+        p.github,
+      ]),
+    ];
+    const blob = new Blob(["\ufeff" + rows.map((r) => r.map(cell).join(";")).join("\n")], {
+      type: "text/csv;charset=utf-8",
+    });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "inscritos-hacko.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  return (
+    <>
+      <div className="section-head">
+        <div>
+          <span className="eyebrow">SEUS HACKATHONS</span>
+          <h1>Inscritos e equipes</h1>
+          <p>Todas as pessoas inscritas e as equipes formadas nos hackathons que vocês criaram.</p>
+        </div>
+      </div>
+      {!events.length ? (
+        <p className="notice">
+          Vocês ainda não criaram hackathons. <a href="#/org">Criar o primeiro →</a>
+        </p>
+      ) : (
+        <>
+          <div className="metrics">
+            {[
+              ["Inscritos", people.length],
+              ["Equipes", teams.length],
+              ["Sem equipe", withoutTeam],
+            ].map(([label, n]) => (
+              <div className="panel" key={label}>
+                <small>{label}</small>
+                <h2>{n}</h2>
+              </div>
+            ))}
+          </div>
+          <div className="people-filters">
+            <label>
+              Hackathon
+              <select value={eventId} onChange={(e) => setEventId(e.target.value)}>
+                <option value="">Todos os hackathons</option>
+                {events.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.title} {e.status !== "published" ? `(${status(e.status)})` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Buscar
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Nome, e-mail, stack, cidade ou equipe"
+              />
+            </label>
+          </div>
+          <div className="auth-tabs people-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "participants"}
+              className={tab === "participants" ? "active" : ""}
+              onClick={() => setTab("participants")}
+            >
+              Participantes ({people.length})
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "teams"}
+              className={tab === "teams" ? "active" : ""}
+              onClick={() => setTab("teams")}
+            >
+              Equipes ({teams.length})
+            </button>
+          </div>
+          {tab === "participants" ? (
+            <section className="panel">
+              <div className="section-head">
+                <small>
+                  Dados compartilhados pelos participantes ao se inscreverem. Use apenas para o evento.
+                </small>
+                <button type="button" className="secondary" onClick={exportCsv} disabled={!people.length}>
+                  Baixar planilha (CSV)
+                </button>
+              </div>
+              {people.length ? (
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        {["Nome", "E-mail", "Stack", "Cidade", "Equipe", "Hackathon", "Links"].map((x) => (
+                          <th key={x}>{x}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {people.map((p: Row) => (
+                        <tr key={p.event_id + p.id}>
+                          <td>{p.name}</td>
+                          <td>
+                            <a href={"mailto:" + p.email}>{p.email}</a>
+                          </td>
+                          <td>{p.skills}</td>
+                          <td>{p.city}</td>
+                          <td>
+                            {p.team_id ? (
+                              <a href={href("/team/" + p.team_id)}>{p.team_name}</a>
+                            ) : (
+                              "Sem equipe"
+                            )}
+                          </td>
+                          <td>{p.event_title}</td>
+                          <td>
+                            {p.linkedin && (
+                              <a href={p.linkedin} target="_blank" rel="noreferrer">
+                                LinkedIn ↗
+                              </a>
+                            )}{" "}
+                            {p.github && (
+                              <a href={p.github} target="_blank" rel="noreferrer">
+                                GitHub ↗
+                              </a>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p>Nenhum inscrito encontrado.</p>
+              )}
+            </section>
+          ) : teams.length ? (
+            <div className="grid">
+              {teams.map((t: Row) => (
+                <article className="panel" key={t.id}>
+                  <span className="pill">{status(t.status)}</span>
+                  <h3>{t.name}</h3>
+                  <small>{t.event_title}</small>
+                  <p>
+                    {t.members}/{t.team_max} integrantes
+                    {t.members < t.team_min && ` · faltam ${t.team_min - t.members} para o mínimo`}
+                  </p>
+                  {t.leader_name && (
+                    <p>
+                      <b>Líder:</b> {t.leader_name}
+                    </p>
+                  )}
+                  {t.member_names && (
+                    <p>
+                      <b>Integrantes:</b> {t.member_names}
+                    </p>
+                  )}
+                  <div className="tags">{tags(t.skills)}</div>
+                  <a className="button secondary" href={href("/manage/" + t.event_id)}>
+                    Gerenciar evento →
+                  </a>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="notice">Nenhuma equipe encontrada.</p>
+          )}
+        </>
+      )}
+    </>
+  );
+}
 function Card({ e }: any) {
   const closed = e.closes_at <= new Date().toISOString();
   return (
@@ -872,6 +1110,7 @@ export default function Hacko() {
         org: "org",
         manage: "manage",
         edit: "manage",
+        inscritos: "people",
       };
       if (a[p[1]]) {
         const item = p[2] || (p[1] === "org" ? b.organizations[0]?.id : "");
@@ -952,12 +1191,21 @@ export default function Hacko() {
         Complete seu perfil para continuar. <a href="#/profile">Criar perfil →</a>
       </div>
     ) : null;
-  const links = [
-    ["/", "Explorar"],
-    ["/mine", "Meus hackathons"],
-    ["/community", "Comunidade"],
-    ["/radar", "Oportunidades"],
-  ];
+  const isCompany = boot?.user?.accountType === "company";
+  const companyOrg = isCompany ? boot?.organizations?.[0] : null;
+  const links = isCompany
+    ? [
+        ["/", "Explorar"],
+        ["/org", "Meus eventos"],
+        ["/inscritos", "Inscritos e equipes"],
+        ["/company", "Perfil da empresa"],
+      ]
+    : [
+        ["/", "Explorar"],
+        ["/mine", "Meus hackathons"],
+        ["/community", "Comunidade"],
+        ["/radar", "Oportunidades"],
+      ];
   function content() {
     if (!boot) return null;
     const p = boot.profile || { ...blankProfile, name: boot.user?.name || "" };
@@ -1126,6 +1374,148 @@ export default function Hacko() {
           </div>
         </>
       );
+    if (page === "inscritos") {
+      if (account()) return account();
+      return <PeopleOverview data={data} />;
+    }
+    if (page === "company" || (page === "profile" && isCompany)) {
+      if (!boot.user) return account();
+      if (!isCompany)
+        return (
+          <section className="panel small-width">
+            <h1>Esta é uma conta de participante.</h1>
+            <p>
+              Para organizar hackathons, saia e crie uma conta escolhendo <b>“Sou uma empresa”</b>.
+            </p>
+            <a className="button" href="#/profile">
+              Ir para meu perfil
+            </a>
+          </section>
+        );
+      const o = companyOrg || {};
+      return (
+        <>
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">PERFIL DA EMPRESA</span>
+              <h1>{o.name || "Sua empresa"}</h1>
+              <p>Estas informações aparecem nos hackathons que vocês publicarem.</p>
+            </div>
+            <a className="button" href={href("/new/" + (o.id || ""))}>
+              Criar hackathon +
+            </a>
+          </div>
+          <div className="two-col">
+            <section className="panel">
+              <h2>Dados da empresa</h2>
+              {o.id && (
+                <ImageInput
+                  key={o.logo_v || "none"}
+                  label="Logo da empresa"
+                  help="Quadrada, 400×400. Aparece nos seus hackathons."
+                  current={o.logo_v ? imageUrl("logo:" + o.id, o.logo_v) : ""}
+                  aspect="square"
+                  onChange={(d: string | null) =>
+                    mutate({ op: "image.upload", kind: "logo", id: o.id, data: d })
+                  }
+                />
+              )}
+              <Form
+                busy={busy}
+                label="Salvar perfil da empresa"
+                onSubmit={(v: Row) => mutate({ op: "organization.update", id: o.id, data: v })}
+              >
+                <Field name="name" label="Nome da empresa" value={o.name} required />
+                <Field name="description" label="Sobre a empresa" type="textarea" value={o.description} />
+                <div className="form-grid">
+                  <Field
+                    name="website"
+                    label="Site da empresa"
+                    type="url"
+                    value={o.website}
+                    help="https://…"
+                  />
+                  <Field name="cnpj" label="CNPJ (opcional)" value={o.cnpj} help="Somente informativo." />
+                  <Field name="city" label="Cidade / UF" value={o.city} />
+                  <Field name="linkedin" label="LinkedIn da empresa" type="url" value={o.linkedin} />
+                  <Field name="instagram" label="Instagram da empresa" type="url" value={o.instagram} />
+                </div>
+                <h3>Pessoa responsável</h3>
+                <small>Visível apenas para você e para a equipe da Hacko.</small>
+                <div className="form-grid">
+                  <Field name="contact_name" label="Nome" value={o.contact_name} />
+                  <Field name="contact_role" label="Cargo" value={o.contact_role} />
+                </div>
+              </Form>
+            </section>
+            <aside className="stack">
+              <section className="panel company-card">
+                <div className="person">
+                  <div className="avatar">
+                    {o.logo_v ? (
+                      <img src={imageUrl("logo:" + o.id, o.logo_v)} alt="" />
+                    ) : (
+                      (o.name || "?").slice(0, 2).toUpperCase()
+                    )}
+                  </div>
+                  <div>
+                    <h3>{o.name}</h3>
+                    <small>{[o.city, boot.user.email].filter(Boolean).join(" · ")}</small>
+                  </div>
+                </div>
+                <p>{o.description}</p>
+                <div className="actions">
+                  {o.website && (
+                    <a href={o.website} target="_blank" rel="noreferrer">
+                      Site ↗
+                    </a>
+                  )}
+                  {o.linkedin && (
+                    <a href={o.linkedin} target="_blank" rel="noreferrer">
+                      LinkedIn ↗
+                    </a>
+                  )}
+                  {o.instagram && (
+                    <a href={o.instagram} target="_blank" rel="noreferrer">
+                      Instagram ↗
+                    </a>
+                  )}
+                </div>
+              </section>
+              <section className="panel dark">
+                <h3>Seus hackathons.</h3>
+                <p>Crie, publique e acompanhe inscrições e equipes.</p>
+                <div className="actions">
+                  <a className="button" href="#/org">
+                    Painel de eventos
+                  </a>
+                  <a className="button secondary" href="#/inscritos">
+                    Inscritos e equipes
+                  </a>
+                </div>
+              </section>
+              <section className="panel">
+                <h3>Sair da conta</h3>
+                <p>
+                  Conectado como <b style={{ overflowWrap: "anywhere" }}>{boot.user.email}</b>.
+                </p>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={async () => {
+                    await fetch("/api/auth/logout", { method: "POST" });
+                    location.href = "/";
+                  }}
+                >
+                  Sair da conta
+                </button>
+              </section>
+              <DeleteAccount />
+            </aside>
+          </div>
+        </>
+      );
+    }
     if (page === "profile")
       return (
         <>
@@ -1251,6 +1641,7 @@ export default function Hacko() {
           <div className="two-col">
             <section>
               <span className="eyebrow">
+                {e.logo_v && <img className="org-logo" src={imageUrl("logo:" + e.org_id, e.logo_v)} alt="" />}
                 {e.organization} · {e.theme}
               </span>
               <h1>{e.title}</h1>
@@ -1306,7 +1697,12 @@ export default function Hacko() {
                 <h2>Seu desafio começa aqui</h2>
                 {account() || (
                   <>
-                    {registered ? (
+                    {isCompany ? (
+                      <p className="notice">
+                        Contas de empresa organizam hackathons e não se inscrevem. Para participar, use uma
+                        conta de participante.
+                      </p>
+                    ) : registered ? (
                       <>
                         <p className="notice">Sua inscrição está confirmada.</p>
                         <div className="actions">
@@ -1670,17 +2066,30 @@ export default function Hacko() {
               ) : (
                 <p>Cadastre sua empresa, universidade ou comunidade para começar.</p>
               )}
-              <details className="panel section" open={!org}>
-                <summary>{org ? "Adicionar outra organização" : "Cadastrar organização"}</summary>
-                <Form
-                  busy={busy}
-                  label="Criar organização"
-                  onSubmit={(v: Row) => mutate({ op: "organization", data: v }, "/org/:id")}
-                >
-                  <Field name="name" label="Nome da organização" required />
-                  <Field name="description" label="Sobre a organização" type="textarea" />
-                </Form>
-              </details>
+              {!isCompany && !org ? (
+                <section className="panel">
+                  <h2>Organize com uma conta de empresa</h2>
+                  <p>
+                    Hackathons são criados por contas de empresa, separadas do seu perfil de participante.
+                    Saia e crie uma conta escolhendo <b>“Sou uma empresa”</b> na tela de login.
+                  </p>
+                  <a className="button" href="#/login?tipo=empresa">
+                    Criar conta de empresa
+                  </a>
+                </section>
+              ) : (
+                <details className="panel section" open={!org}>
+                  <summary>{org ? "Adicionar outra organização" : "Cadastrar organização"}</summary>
+                  <Form
+                    busy={busy}
+                    label="Criar organização"
+                    onSubmit={(v: Row) => mutate({ op: "organization", data: v }, "/org/:id")}
+                  >
+                    <Field name="name" label="Nome da organização" required />
+                    <Field name="description" label="Sobre a organização" type="textarea" />
+                  </Form>
+                </details>
+              )}
               {org && (
                 <details className="panel">
                   <summary>Histórico de atividades</summary>
@@ -1967,14 +2376,33 @@ export default function Hacko() {
               }}
             />
           )}
-          <a className="account-link" href={boot?.user ? "#/profile" : "#/login"}>
-            {shortName(boot?.profile?.name || boot?.user?.name) || "Minha conta"} ↗
+          <a className="account-link" href={!boot?.user ? "#/login" : isCompany ? "#/company" : "#/profile"}>
+            {isCompany && companyOrg?.logo_v && (
+              <img
+                className="header-logo"
+                src={imageUrl("logo:" + companyOrg.id, companyOrg.logo_v)}
+                alt=""
+              />
+            )}
+            {(isCompany
+              ? companyOrg?.name || boot?.user?.name
+              : shortName(boot?.profile?.name || boot?.user?.name)) || "Minha conta"}{" "}
+            ↗
           </a>
         </div>
         <div className="mobile-tabs">
           <a href="#/">Explorar</a>
-          <a href="#/mine">Meus hackathons</a>
-          <a href="#/teams">Equipes</a>
+          {isCompany ? (
+            <>
+              <a href="#/org">Meus eventos</a>
+              <a href="#/inscritos">Inscritos</a>
+            </>
+          ) : (
+            <>
+              <a href="#/mine">Meus hackathons</a>
+              <a href="#/teams">Equipes</a>
+            </>
+          )}
         </div>
       </header>
       <main id="main" className={page === "login" ? "" : "container"}>
@@ -2011,9 +2439,15 @@ export default function Hacko() {
       </main>
       <nav className="bottom" aria-label="Atalhos mobile">
         <a href="#/">Explorar</a>
-        <a href="#/community">Comunidade</a>
-        <a href="#/radar">Radar</a>
-        <a href="#/profile">Perfil</a>
+        {isCompany ? (
+          <a href="#/org">Eventos</a>
+        ) : (
+          <>
+            <a href="#/community">Comunidade</a>
+            <a href="#/radar">Radar</a>
+          </>
+        )}
+        <a href={isCompany ? "#/company" : "#/profile"}>Perfil</a>
       </nav>
     </>
   );

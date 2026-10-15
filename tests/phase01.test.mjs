@@ -83,8 +83,17 @@ const api = compiled("../app/api/hacko/route.ts", {
   "../../../lib/validation": validation,
   "../../../lib/domain.mjs": domain,
 });
+// Contas de empresa no cenário de teste (organizam, não participam).
+const companies = new Set();
 const as = (id) => {
-  user = id ? { userId: id, email: id + "@example.test", displayName: id } : null;
+  user = id
+    ? {
+        userId: id,
+        email: id + "@example.test",
+        displayName: id,
+        accountType: companies.has(id) ? "company" : "participant",
+      }
+    : null;
 };
 async function post(body) {
   const r = await api.POST(
@@ -127,6 +136,10 @@ test("fase 01: autenticação, isolamento e jornada de evento/equipe", async () 
       200,
     );
   }
+  // participante sem organização não cria uma: precisa ser conta de empresa
+  as("alice");
+  assert.equal((await post({ op: "organization", data: { name: "Empresa da Alice", description: "" } })).status, 403);
+  companies.add("owner");
   as("owner");
   org = (await post({ op: "organization", data: { name: "Organização teste", description: "" } })).body.id;
   const data = {
@@ -156,9 +169,10 @@ test("fase 01: autenticação, isolamento e jornada de evento/equipe", async () 
   assert.equal((await post({ op: "event.save", id: event, data })).status, 403);
   assert.equal((await get("event", event)).status, 404);
   as("owner");
-  const draftReg = await post({ op: "register", id: event, accept: true });
-  assert.equal(draftReg.status, 409);
-  assert.match(draftReg.body.error, /não foi publicado/);
+  // empresa não se inscreve nem no próprio evento
+  const companyReg = await post({ op: "register", id: event, accept: true });
+  assert.equal(companyReg.status, 403);
+  assert.match(companyReg.body.error, /empresa/);
   assert.equal((await post({ op: "event.publish", id: event })).status, 400);
   assert.equal((await post({ op: "event.publish", id: event, confirm: true })).status, 200);
   for (const id of ["alice", "bob", "carol"]) {
@@ -511,4 +525,74 @@ test("conta: esqueci minha senha e exclusão de conta", async () => {
   // dono de organização com inscritos não pode apagar a conta sem resolver o evento
   as("owner");
   assert.equal((await post({ op: "account.delete", confirm: "EXCLUIR" })).status, 409);
+});
+
+test("empresa: cadastro, perfil da empresa, logo e restrições", async () => {
+  const auth = compiled("../lib/auth.ts", { "cloudflare:workers": { env: { DB: db } } });
+  const origin = "http://localhost:5173";
+  const r = await auth.signup(
+    new Request(origin + "/api/auth/signup", {
+      method: "POST",
+      headers: { origin, "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Acme",
+        email: "contato@acme.test",
+        password: "Senha-forte-1",
+        account_type: "company",
+      }),
+    }),
+  );
+  assert.equal(r.status, 200);
+  assert.equal((await r.json()).accountType, "company");
+  const acme = sql.prepare("SELECT id,account_type FROM users WHERE email='contato@acme.test'").get();
+  assert.equal(acme.account_type, "company");
+  // empresa já nasce com organização e perfil interno oculto
+  const org = sql.prepare("SELECT id,name FROM organizations WHERE owner_id=?").get(acme.id);
+  assert.equal(org.name, "Acme");
+  assert.equal(sql.prepare("SELECT visible FROM profiles WHERE id=?").get(acme.id).visible, 0);
+
+  companies.add(acme.id);
+  as(acme.id);
+  const data = {
+    name: "Acme Tecnologia",
+    description: "Empresa de teste",
+    website: "https://acme.test",
+    cnpj: "12.345.678/0001-90",
+    city: "Fortaleza/CE",
+    linkedin: "",
+    instagram: "",
+    contact_name: "Ana Lima",
+    contact_role: "RH",
+  };
+  assert.equal((await post({ op: "organization.update", id: org.id, data: { ...data, cnpj: "123" } })).status, 400);
+  assert.equal((await post({ op: "organization.update", id: org.id, data })).status, 200);
+  assert.equal(sql.prepare("SELECT name FROM users WHERE id=?").get(acme.id).name, "Acme Tecnologia");
+  const png =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  assert.equal((await post({ op: "image.upload", kind: "logo", id: org.id, data: png })).status, 200);
+  assert.ok((await get("bootstrap")).body.organizations[0].logo_v);
+  // empresa não participa
+  for (const body of [
+    { op: "register", id: event, accept: true },
+    { op: "profile", data: {} },
+    { op: "team.create", data: { event_id: event, name: "Equipe X", skills: "", description: "" } },
+    { op: "image.upload", kind: "avatar", data: png },
+  ])
+    assert.equal((await post(body)).status, 403, body.op);
+  // visão de inscritos e equipes: o organizador vê os do próprio evento, outras contas não
+  as("owner");
+  const overview = (await get("people")).body;
+  assert.ok(overview.events.some((e) => e.id === event));
+  assert.ok(overview.participants.length > 0);
+  assert.ok(overview.participants.every((p) => p.event_id && p.email && p.event_title));
+  as(acme.id);
+  const acmeView = (await get("people")).body;
+  assert.equal(acmeView.participants.length, 0);
+  assert.equal(acmeView.teams.length, 0);
+  as(null);
+  assert.equal((await get("people")).status, 401);
+  // outra conta não altera a empresa
+  as("alice");
+  assert.equal((await post({ op: "organization.update", id: org.id, data })).status, 403);
+  assert.equal((await post({ op: "image.upload", kind: "logo", id: org.id, data: png })).status, 403);
 });

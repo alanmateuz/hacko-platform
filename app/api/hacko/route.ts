@@ -1,7 +1,13 @@
 import { env } from "cloudflare:workers";
 import { getCurrentUser } from "../../session";
 import { emailEnabled, enabledProviders } from "../../../lib/auth";
-import { eventSchema, organizationSchema, profileSchema, teamSchema } from "../../../lib/validation";
+import {
+  companySchema,
+  eventSchema,
+  organizationSchema,
+  profileSchema,
+  teamSchema,
+} from "../../../lib/validation";
 import { suggestTeams, searchCatalog } from "../../../lib/domain.mjs";
 export const dynamic = "force-dynamic";
 const uid = () => crypto.randomUUID(),
@@ -138,7 +144,7 @@ const audit = (org: string, actor: string, action: string, target: string) =>
   );
 const notify = (id: string, message: string) =>
   stmt("INSERT INTO notifications(id,user_id,message,created_at) VALUES(?,?,?,?)", uid(), id, message, now());
-const counts = `(SELECT updated_at FROM images WHERE id='cover:'||e.id) cover_v,(SELECT count(*) FROM registrations r WHERE r.event_id=e.id AND r.status='active') participants,(SELECT count(*) FROM teams t WHERE t.event_id=e.id) teams`;
+const counts = `(SELECT updated_at FROM images WHERE id='cover:'||e.id) cover_v,(SELECT updated_at FROM images WHERE id='logo:'||e.org_id) logo_v,(SELECT count(*) FROM registrations r WHERE r.event_id=e.id AND r.status='active') participants,(SELECT count(*) FROM teams t WHERE t.event_id=e.id) teams`;
 async function eligible(eventId: string) {
   return all(
     `SELECT p.id,p.name,p.skills,p.availability FROM profiles p JOIN registrations r ON r.user_id=p.id WHERE r.event_id=? AND r.status='active' AND NOT EXISTS(SELECT 1 FROM team_members m WHERE m.user_id=p.id AND m.event_id=r.event_id) ORDER BY p.id`,
@@ -186,14 +192,26 @@ export async function GET(request: Request) {
         `SELECT e.*,o.name organization,${counts} FROM events e JOIN organizations o ON o.id=e.org_id WHERE e.status='published' ORDER BY e.starts_at`,
       );
       return json({
-        user: user ? { id: user.userId, name: user.displayName, email: user.email } : null,
+        user: user
+          ? {
+              id: user.userId,
+              name: user.displayName,
+              email: user.email,
+              accountType: user.accountType || "participant",
+            }
+          : null,
         profile: user
           ? await one(
               "SELECT p.*,(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v FROM profiles p WHERE id=?",
               user.userId,
             )
           : null,
-        organizations: user ? await all("SELECT * FROM organizations WHERE owner_id=?", user.userId) : [],
+        organizations: user
+          ? await all(
+              "SELECT o.*,(SELECT updated_at FROM images WHERE id='logo:'||o.id) logo_v FROM organizations o WHERE owner_id=? ORDER BY o.rowid",
+              user.userId,
+            )
+          : [],
         events: catalog,
         registrations: user
           ? await all(
@@ -269,6 +287,24 @@ export async function GET(request: Request) {
           u.userId,
         ),
       });
+    // Visão geral da organização: participantes e equipes de todos os hackathons que a conta criou.
+    if (action === "people") {
+      const own = "SELECT e.id FROM events e JOIN organizations o ON o.id=e.org_id WHERE o.owner_id=?";
+      return json({
+        events: await all(
+          "SELECT e.id,e.title,e.status,e.starts_at,e.team_min,e.team_max FROM events e JOIN organizations o ON o.id=e.org_id WHERE o.owner_id=? ORDER BY e.starts_at DESC",
+          u.userId,
+        ),
+        participants: await all(
+          `SELECT r.event_id,r.created_at,e.title event_title,p.id,p.name,p.email,p.skills,p.city,p.availability,p.linkedin,p.github,t.id team_id,t.name team_name FROM registrations r JOIN events e ON e.id=r.event_id JOIN profiles p ON p.id=r.user_id LEFT JOIN team_members m ON m.user_id=r.user_id AND m.event_id=r.event_id LEFT JOIN teams t ON t.id=m.team_id WHERE r.event_id IN (${own}) AND r.status='active' ORDER BY e.starts_at DESC,p.name`,
+          u.userId,
+        ),
+        teams: await all(
+          `SELECT t.id,t.name,t.status,t.skills,t.description,t.event_id,e.title event_title,e.team_min,e.team_max,l.name leader_name,(SELECT count(*) FROM team_members m WHERE m.team_id=t.id) members,(SELECT group_concat(p.name,', ') FROM team_members m JOIN profiles p ON p.id=m.user_id WHERE m.team_id=t.id) member_names FROM teams t JOIN events e ON e.id=t.event_id LEFT JOIN profiles l ON l.id=t.leader_id WHERE t.event_id IN (${own}) ORDER BY e.starts_at DESC,t.name`,
+          u.userId,
+        ),
+      });
+    }
     if (action === "org") {
       await ownOrg(id, u.userId);
       return json({
@@ -322,11 +358,31 @@ export async function POST(request: Request) {
       op = typeof body.op === "string" ? body.op : "",
       id = String(body.id || "");
     if (op !== "image.upload" && raw.length > 40000) fail("Dados muito grandes.", 413);
+    // Contas de empresa só organizam: não se inscrevem, não entram em equipes e não têm perfil de participante.
+    if (
+      u.accountType === "company" &&
+      (op === "register" ||
+        op === "cancel" ||
+        op === "profile" ||
+        (op.startsWith("team.") && op !== "team.confirm") ||
+        (op === "image.upload" && body.kind === "avatar"))
+    )
+      fail(
+        "Contas de empresa organizam hackathons e não participam deles. Para participar, use uma conta de participante.",
+        403,
+      );
     if (op === "image.upload") {
       const kind =
-        body.kind === "cover" ? "cover" : body.kind === "avatar" ? "avatar" : fail("Tipo inválido.");
+        body.kind === "cover"
+          ? "cover"
+          : body.kind === "avatar"
+            ? "avatar"
+            : body.kind === "logo"
+              ? "logo"
+              : fail("Tipo inválido.");
       const target = kind === "avatar" ? u.userId : id;
       if (kind === "avatar") await profile(u.userId);
+      else if (kind === "logo") await ownOrg(target, u.userId);
       else await ownEvent(target, u.userId);
       const key = kind + ":" + target;
       if (body.data === null) {
@@ -434,7 +490,40 @@ export async function POST(request: Request) {
       return json({ ok: true });
     }
     await profile(u.userId);
+    if (op === "organization.update") {
+      await ownOrg(id, u.userId);
+      const d = companySchema.parse(body.data);
+      await db().batch([
+        stmt(
+          "UPDATE organizations SET name=?,description=?,website=?,cnpj=?,city=?,linkedin=?,instagram=?,contact_name=?,contact_role=? WHERE id=?",
+          d.name,
+          d.description,
+          d.website,
+          d.cnpj,
+          d.city,
+          d.linkedin,
+          d.instagram,
+          d.contact_name,
+          d.contact_role,
+          id,
+        ),
+        ...(u.accountType === "company"
+          ? [
+              stmt("UPDATE users SET name=? WHERE id=?", d.name, u.userId),
+              stmt("UPDATE profiles SET name=? WHERE id=?", d.name, u.userId),
+            ]
+          : []),
+        audit(id, u.userId, "organization.updated", id),
+      ]);
+      return json({ ok: true, id });
+    }
     if (op === "organization") {
+      // Novas organizações são criadas por contas de empresa; contas antigas que já têm uma continuam podendo.
+      if (
+        u.accountType !== "company" &&
+        !(await one("SELECT 1 FROM organizations WHERE owner_id=?", u.userId))
+      )
+        fail("Para organizar hackathons, crie uma conta de empresa.", 403);
       const d = organizationSchema.parse(body.data);
       const orgId = uid();
       await db().batch([
