@@ -38,6 +38,8 @@ npx wrangler secret put GITHUB_CLIENT_SECRET --name hacko-platform
 npx wrangler secret put LINKEDIN_CLIENT_ID --name hacko-platform
 npx wrangler secret put LINKEDIN_CLIENT_SECRET --name hacko-platform
 npx wrangler secret put OPENAI_API_KEY --name hacko-platform   # opcional, para o Radar
+npx wrangler secret put RESEND_API_KEY --name hacko-platform   # e-mails de "esqueci minha senha"
+npx wrangler secret put AUTH_FROM_EMAIL --name hacko-platform  # opcional; padrão: Hacko <nao-responda@hacko.com.br>
 ```
 
 O domínio `hacko.com.br` precisa estar **Active** na Cloudflare; o deploy cria os registros de `hacko.com.br` e `www.hacko.com.br`.
@@ -57,5 +59,5 @@ Publicação manual (emergência): `HACKO_D1_ID=<id> HACKO_DOMAIN=hacko.com.br p
 
 ## Desenvolvimento local
 
-`pnpm dev`.
+`pnpm dev`. Sem `RESEND_API_KEY`, o link de "esqueci minha senha" aparece no terminal do servidor (só em localhost).
 Chaves locais vão em `.dev.vars` (ignorado pelo Git).

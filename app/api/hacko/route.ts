@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { getCurrentUser } from "../../session";
-import { enabledProviders } from "../../../lib/auth";
+import { emailEnabled, enabledProviders } from "../../../lib/auth";
 import { eventSchema, organizationSchema, profileSchema, teamSchema } from "../../../lib/validation";
 import { suggestTeams, searchCatalog } from "../../../lib/domain.mjs";
 export const dynamic = "force-dynamic";
@@ -210,6 +210,7 @@ export async function GET(request: Request) {
           : [],
         aiEnabled: !!(env as any).OPENAI_API_KEY,
         authProviders: enabledProviders(),
+        passwordReset: emailEnabled(),
       });
     }
     if (action === "event") {
@@ -341,6 +342,78 @@ export async function POST(request: Request) {
         now(),
       ).run();
       return json({ ok: true, id: target });
+    }
+    if (op === "account.delete") {
+      if (body.confirm !== "EXCLUIR") fail("Digite EXCLUIR para confirmar.");
+      const uidv = u.userId;
+      // Organizações com eventos que já têm outras pessoas inscritas não podem sumir sem aviso.
+      const busy = await one(
+        "SELECT e.title FROM events e JOIN organizations o ON o.id=e.org_id WHERE o.owner_id=? AND EXISTS(SELECT 1 FROM registrations r WHERE r.event_id=e.id AND r.user_id<>? AND r.status='active') LIMIT 1",
+        uidv,
+        uidv,
+      );
+      if (busy)
+        fail(
+          `Sua organização tem participantes inscritos em "${busy.title}". Arquive o evento e fale com o suporte antes de excluir a conta.`,
+          409,
+        );
+      const leading = await one(
+        "SELECT t.name FROM teams t WHERE t.leader_id=? AND EXISTS(SELECT 1 FROM team_members m WHERE m.team_id=t.id AND m.user_id<>?) LIMIT 1",
+        uidv,
+        uidv,
+      );
+      if (leading)
+        fail(`Você lidera a equipe "${leading.name}". Dissolva a equipe antes de excluir a conta.`, 409);
+      const orgEvents = "SELECT e.id FROM events e JOIN organizations o ON o.id=e.org_id WHERE o.owner_id=?";
+      const evTeams = `SELECT id FROM teams WHERE event_id IN (${orgEvents})`;
+      const myTeams = "SELECT id FROM teams WHERE leader_id=?";
+      const email = (await one("SELECT email FROM users WHERE id=?", uidv))?.email || u.email;
+      await db().batch([
+        // Dados das organizações próprias (eventos sem outros inscritos).
+        stmt(
+          `DELETE FROM matching_approvals WHERE run_id IN (SELECT id FROM matching_runs WHERE event_id IN (${orgEvents}))`,
+          uidv,
+        ),
+        stmt(`DELETE FROM matching_runs WHERE event_id IN (${orgEvents})`, uidv),
+        stmt(`DELETE FROM team_requests WHERE team_id IN (${evTeams})`, uidv),
+        stmt(`DELETE FROM team_members WHERE event_id IN (${orgEvents})`, uidv),
+        stmt(`DELETE FROM teams WHERE event_id IN (${orgEvents})`, uidv),
+        stmt(`DELETE FROM registrations WHERE event_id IN (${orgEvents})`, uidv),
+        stmt(`DELETE FROM favorites WHERE event_id IN (${orgEvents})`, uidv),
+        stmt(`DELETE FROM images WHERE id IN (SELECT 'cover:'||id FROM (${orgEvents}))`, uidv),
+        stmt("DELETE FROM events WHERE org_id IN (SELECT id FROM organizations WHERE owner_id=?)", uidv),
+        stmt("DELETE FROM audit_logs WHERE org_id IN (SELECT id FROM organizations WHERE owner_id=?)", uidv),
+        stmt("DELETE FROM organizations WHERE owner_id=?", uidv),
+        // Participação pessoal.
+        stmt(`DELETE FROM team_requests WHERE user_id=? OR team_id IN (${myTeams})`, uidv, uidv),
+        stmt(`DELETE FROM team_members WHERE user_id=? OR team_id IN (${myTeams})`, uidv, uidv),
+        stmt("DELETE FROM teams WHERE leader_id=?", uidv),
+        stmt("DELETE FROM registrations WHERE user_id=?", uidv),
+        stmt("DELETE FROM favorites WHERE user_id=?", uidv),
+        stmt("DELETE FROM notifications WHERE user_id=?", uidv),
+        stmt("DELETE FROM ai_usage WHERE user_id=?", uidv),
+        stmt("DELETE FROM images WHERE id=?", "avatar:" + uidv),
+        // Históricos de outras organizações ficam, mas sem identificar a pessoa.
+        stmt("UPDATE audit_logs SET actor_id='conta-excluida' WHERE actor_id=?", uidv),
+        stmt("UPDATE matching_approvals SET actor_id='conta-excluida' WHERE actor_id=?", uidv),
+        stmt("DELETE FROM profiles WHERE id=?", uidv),
+        // Acesso.
+        stmt("DELETE FROM sessions WHERE user_id=?", uidv),
+        stmt("DELETE FROM identities WHERE user_id=?", uidv),
+        stmt("DELETE FROM password_resets WHERE user_id=?", uidv),
+        stmt("DELETE FROM login_failures WHERE email=?", email),
+        stmt("DELETE FROM users WHERE id=?", uidv),
+      ]);
+      const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+      return Response.json(
+        { ok: true },
+        {
+          headers: {
+            "Cache-Control": "no-store",
+            "Set-Cookie": `hacko_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`,
+          },
+        },
+      );
     }
     if (op === "profile") {
       const p = profileSchema.parse(body.data);
