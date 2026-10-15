@@ -305,7 +305,10 @@ async function credentials(request: Request) {
   const password = String(body.password || "");
   if (!EMAIL_RE.test(email) || email.length > 254) return fail("Informe um e-mail válido.", 400);
   if (!password || password.length > 200) return fail("Informe sua senha.", 400);
-  return { email, password };
+  const name = String(body.name || "")
+    .trim()
+    .replace(/\s+/g, " ");
+  return { email, password, name };
 }
 async function sessionResponse(userId: string, request: Request) {
   const r = await startSession(userId, request, "/");
@@ -314,10 +317,12 @@ async function sessionResponse(userId: string, request: Request) {
   return new Response(JSON.stringify({ ok: true }), { headers });
 }
 
-// POST /api/auth/signup {email, password}
+// POST /api/auth/signup {name, email, password}
 export async function signup(request: Request) {
   const c = await credentials(request);
   if (c instanceof Response) return c;
+  if (c.name.length > 160 || c.name.split(" ").filter((w) => w.length > 0).length < 2)
+    return fail("Informe seu nome e sobrenome.", 400);
   const weak = passwordProblems(c.password);
   if (weak.length) return fail("A senha precisa ter " + weak.join(", ") + ".", 400);
   if (await db().prepare("SELECT 1 FROM users WHERE email=?").bind(c.email).first())
@@ -326,7 +331,7 @@ export async function signup(request: Request) {
   try {
     await db()
       .prepare("INSERT INTO users(id,email,name,password_hash,email_verified,created_at) VALUES(?,?,?,?,0,?)")
-      .bind(userId, c.email, c.email.split("@")[0], await hashPassword(c.password), now())
+      .bind(userId, c.email, c.name, await hashPassword(c.password), now())
       .run();
   } catch (e) {
     if (String((e as Error)?.message).includes("UNIQUE")) return fail("Este e-mail já tem conta.", 409);

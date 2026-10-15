@@ -76,7 +76,10 @@ const validation = compiled("../lib/validation.ts", {});
 const api = compiled("../app/api/hacko/route.ts", {
   "cloudflare:workers": { env: { DB: db } },
   "../../session": { getCurrentUser: async () => user },
-  "../../../lib/auth": { enabledProviders: () => ["google", "github", "linkedin"], emailEnabled: () => false },
+  "../../../lib/auth": {
+    enabledProviders: () => ["google", "github", "linkedin"],
+    emailEnabled: () => false,
+  },
   "../../../lib/validation": validation,
   "../../../lib/domain.mjs": domain,
 });
@@ -334,22 +337,66 @@ test("auth: cadastro e login com senha, sessão, logout e proteções", async ()
   const sessionOf = (r) => r.headers.get("set-cookie").match(/hacko_session=([^;]+)/)[1];
 
   assert.equal(
-    (await call("signup", { email: "x@y.test", password: "12345678" }, "https://evil.test")).status,
+    (
+      await call(
+        "signup",
+        { name: "Pessoa Teste", email: "x@y.test", password: "12345678" },
+        "https://evil.test",
+      )
+    ).status,
     403,
   );
-  assert.equal((await call("signup", { email: "nao-e-email", password: "12345678" })).status, 400);
-  assert.equal((await call("signup", { email: "ana@example.test", password: "curta" })).status, 400);
+  assert.equal(
+    (await call("signup", { name: "Pessoa Teste", email: "nao-e-email", password: "12345678" })).status,
+    400,
+  );
+  assert.equal(
+    (await call("signup", { name: "Pessoa Teste", email: "ana@example.test", password: "curta" })).status,
+    400,
+  );
   // regras da senha: 8+ caracteres, maiúscula e número
-  assert.match((await (await call("signup", { email: "ana@example.test", password: "semmaiuscula1" })).json()).error, /maiúscula/);
-  assert.match((await (await call("signup", { email: "ana@example.test", password: "SemNumeroAqui" })).json()).error, /número/);
-  const created = await call("signup", { email: "Ana@Example.test", password: "Senha-forte-1" });
+  assert.match(
+    (
+      await (
+        await call("signup", { name: "Pessoa Teste", email: "ana@example.test", password: "semmaiuscula1" })
+      ).json()
+    ).error,
+    /maiúscula/,
+  );
+  assert.match(
+    (
+      await (
+        await call("signup", { name: "Pessoa Teste", email: "ana@example.test", password: "SemNumeroAqui" })
+      ).json()
+    ).error,
+    /número/,
+  );
+  // nome e sobrenome são obrigatórios no cadastro
+  assert.match(
+    (await (await call("signup", { email: "sem-nome@example.test", password: "Senha-forte-1" })).json())
+      .error,
+    /sobrenome/,
+  );
+  assert.equal(
+    (await call("signup", { name: "Maria", email: "so-nome@example.test", password: "Senha-forte-1" }))
+      .status,
+    400,
+  );
+  const created = await call("signup", {
+    name: "  Pessoa   Teste ",
+    email: "Ana@Example.test",
+    password: "Senha-forte-1",
+  });
   assert.equal(created.status, 200);
   assert.match(created.headers.get("set-cookie"), /hacko_session=[^;]+; Path=\/; HttpOnly; SameSite=Lax/);
+  const me = await auth.userFromCookieHeader("hacko_session=" + sessionOf(created));
+  assert.equal(me.email, "ana@example.test");
+  assert.equal(me.displayName, "Pessoa Teste");
   assert.equal(
-    (await auth.userFromCookieHeader("hacko_session=" + sessionOf(created))).email,
-    "ana@example.test",
+    (await call("signup", { name: "Pessoa Teste", email: "ana@example.test", password: "Outra-senha1" }))
+      .status,
+    409,
   );
-  assert.equal((await call("signup", { email: "ana@example.test", password: "Outra-senha1" })).status, 409);
   // senha nunca é guardada em texto puro
   const stored = sql
     .prepare("SELECT password_hash FROM users WHERE email='ana@example.test'")
@@ -399,7 +446,11 @@ test("conta: esqueci minha senha e exclusão de conta", async () => {
         body: JSON.stringify(body),
       }),
     );
-  assert.equal((await call("signup", { email: "rita@example.test", password: "Senha-antiga1" })).status, 200);
+  assert.equal(
+    (await call("signup", { name: "Pessoa Teste", email: "rita@example.test", password: "Senha-antiga1" }))
+      .status,
+    200,
+  );
   const logs = [];
   const origLog = console.log;
   console.log = (...a) => logs.push(a.join(" "));
@@ -411,7 +462,9 @@ test("conta: esqueci minha senha e exclusão de conta", async () => {
   } finally {
     console.log = origLog;
   }
-  const token = new URL(logs.at(-1).split(" ").at(-1).replace("/#/redefinir", "/redefinir")).searchParams.get("token");
+  const token = new URL(logs.at(-1).split(" ").at(-1).replace("/#/redefinir", "/redefinir")).searchParams.get(
+    "token",
+  );
   assert.ok(token);
   assert.ok(!sql.prepare("SELECT 1 FROM password_resets WHERE id=?").get(token)); // só o hash fica salvo
   assert.equal((await call("resetPassword", { token, password: "fraca" })).status, 400);
@@ -432,7 +485,9 @@ test("conta: esqueci minha senha e exclusão de conta", async () => {
   sql.exec(
     "INSERT INTO teams(id,event_id,name,leader_id,status,skills,description) VALUES('t-del','ev-del','Equipe del','bob','forming','','')",
   );
-  sql.exec("INSERT INTO team_members(team_id,event_id,user_id) VALUES('t-del','ev-del','bob'),('t-del','ev-del','carol')");
+  sql.exec(
+    "INSERT INTO team_members(team_id,event_id,user_id) VALUES('t-del','ev-del','bob'),('t-del','ev-del','carol')",
+  );
   as("bob");
   assert.equal((await post({ op: "account.delete", confirm: "EXCLUIR" })).status, 409);
   as("dave");
@@ -446,7 +501,12 @@ test("conta: esqueci minha senha e exclusão de conta", async () => {
   );
   assert.equal(ok.status, 200);
   assert.match(ok.headers.get("set-cookie"), /hacko_session=; .*Max-Age=0/);
-  for (const t of ["profiles WHERE id", "registrations WHERE user_id", "favorites WHERE user_id", "notifications WHERE user_id"])
+  for (const t of [
+    "profiles WHERE id",
+    "registrations WHERE user_id",
+    "favorites WHERE user_id",
+    "notifications WHERE user_id",
+  ])
     assert.equal(sql.prepare(`SELECT count(*) n FROM ${t}='dave'`).get().n, 0, t);
   // dono de organização com inscritos não pode apagar a conta sem resolver o evento
   as("owner");
