@@ -2214,6 +2214,42 @@ export default function Hacko() {
                 <p>
                   {t.members} integrantes · {status(t.status)}
                 </p>
+                <ul className="team-members">
+                  {data.registrations
+                    .filter((r: Row) => r.team_id === t.id)
+                    .sort(
+                      (a: Row, b: Row) =>
+                        (b.user_id === t.leader_id ? 1 : 0) - (a.user_id === t.leader_id ? 1 : 0),
+                    )
+                    .map((r: Row) => (
+                      <li key={r.user_id}>
+                        <b>
+                          {r.name}
+                          {r.user_id === t.leader_id && <span className="pill">Líder</span>}
+                        </b>
+                        <a href={"mailto:" + r.email}>{r.email}</a>
+                        <small>
+                          {[r.skills, r.city, r.availability || "Disponibilidade não informada"]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </small>
+                        {(r.linkedin || r.github) && (
+                          <span className="actions">
+                            {r.linkedin && (
+                              <a href={r.linkedin} target="_blank" rel="noreferrer">
+                                LinkedIn ↗
+                              </a>
+                            )}
+                            {r.github && (
+                              <a href={r.github} target="_blank" rel="noreferrer">
+                                GitHub ↗
+                              </a>
+                            )}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                </ul>
                 {t.status === "forming" &&
                   button("Confirmar equipe", { op: "team.confirm", id: t.id }, "Confirmar esta equipe?")}
               </section>

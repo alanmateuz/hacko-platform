@@ -321,7 +321,7 @@ export async function GET(request: Request) {
       return json({
         event: { ...e, cover_v: cover?.updated_at || null },
         registrations: await all(
-          "SELECT r.*,p.name,p.email,p.skills,p.availability,m.team_id FROM registrations r JOIN profiles p ON p.id=r.user_id LEFT JOIN team_members m ON m.user_id=r.user_id AND m.event_id=r.event_id WHERE r.event_id=?",
+          "SELECT r.*,p.name,p.email,p.skills,p.availability,p.city,p.linkedin,p.github,m.team_id FROM registrations r JOIN profiles p ON p.id=r.user_id LEFT JOIN team_members m ON m.user_id=r.user_id AND m.event_id=r.event_id WHERE r.event_id=?",
           id,
         ),
         teams: await all(
