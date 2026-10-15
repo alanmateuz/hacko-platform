@@ -1157,3 +1157,116 @@ button.danger {
 button.danger:disabled {
   opacity: 0.5;
 }
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.notif {
+  position: relative;
+}
+.notif-button {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: transparent;
+  color: white;
+  border: 1px solid #333;
+  box-shadow: none;
+}
+.notif-button:hover,
+.notif-button[aria-expanded="true"] {
+  background: #2a2a2a;
+}
+.notif-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background: var(--lime);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+.notif-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 50;
+  width: min(360px, calc(100vw - 32px));
+  background: var(--white);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+.notif-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.notif-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.notif-panel li {
+  display: grid;
+  gap: 2px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+.notif-panel li.unread {
+  background: #f4f8ff;
+  border-left: 3px solid var(--blue);
+}
+.notif-panel li small {
+  color: var(--muted);
+}
+.notif-empty {
+  padding: 16px;
+  margin: 0;
+  color: var(--muted);
+}
+.notif-all {
+  display: block;
+  padding: 12px 16px;
+  font-size: 14px;
+}
+@media (max-width: 720px) {
+  .header-actions {
+    margin-left: auto;
+  }
+  .header-actions .account-link {
+    margin-left: 0;
+  }
+  /* No celular o painel ocupa a largura da tela, logo abaixo do cabeçalho. */
+  header {
+    position: relative;
+  }
+  .notif {
+    position: static;
+  }
+  .notif-panel {
+    left: 16px;
+    right: 16px;
+    top: calc(100% - 8px);
+    width: auto;
+  }
+}
