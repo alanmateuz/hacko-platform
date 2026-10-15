@@ -1103,6 +1103,22 @@ export default function Hacko() {
                     Abrir organização
                   </a>
                 </section>
+                <section className="panel">
+                  <h3>Sair da conta</h3>
+                  <p>
+                    Conectado como <b style={{ overflowWrap: "anywhere" }}>{boot.user.email}</b>.
+                  </p>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={async () => {
+                      await fetch("/api/auth/logout", { method: "POST" });
+                      location.href = "/";
+                    }}
+                  >
+                    Sair da conta
+                  </button>
+                </section>
                 <DeleteAccount />
                 <section className="panel">
                   <h3>Notificações</h3>
