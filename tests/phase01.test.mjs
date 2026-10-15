@@ -228,11 +228,19 @@ test("fase 01: autenticação, isolamento e jornada de evento/equipe", async () 
   assert.equal(managed.registrations.length, 3);
   assert.equal(managed.teams[0].members, 2);
   assert.equal((await post({ op: "event.save", id: event, data: { ...data, capacity: 2 } })).status, 409);
+  // líder com integrantes não cancela sem dissolver a equipe
+  as("alice");
+  assert.equal((await post({ op: "cancel", id: event })).status, 409);
+  // integrante cancela a inscrição e sai da equipe na mesma ação; o líder é avisado
   as("bob");
-  assert.equal((await post({ op: "cancel", id: event })).status, 400);
-  assert.equal((await post({ op: "team.leave", id: team })).status, 200);
-  assert.equal(sql.prepare("SELECT status FROM teams WHERE id=?").get(team).status, "forming");
   assert.equal((await post({ op: "cancel", id: event })).status, 200);
+  assert.equal(sql.prepare("SELECT status FROM teams WHERE id=?").get(team).status, "forming");
+  assert.ok(!sql.prepare("SELECT 1 FROM team_members WHERE team_id=? AND user_id='bob'").get(team));
+  assert.ok(
+    sql
+      .prepare("SELECT 1 FROM notifications WHERE user_id='alice' AND message LIKE 'Um integrante saiu%'")
+      .get(),
+  );
   as("owner");
   assert.equal((await post({ op: "team.confirm", id: team })).status, 409);
   const bad = await api.POST(
@@ -653,4 +661,30 @@ test("entregas: líder envia, organização avalia", async () => {
   // depois de avaliada, a equipe não altera mais a entrega
   as("bob");
   assert.equal((await post({ op: "team.submit", id: "t-sub", url: "https://github.com/x/z" })).status, 409);
+});
+
+test("equipes: minha equipe no evento, mínimo para entregar e confirmação após o início", async () => {
+  // equipe com 1 integrante (mínimo 2) não entrega; organização ainda confirma após o início
+  sql.exec(
+    "INSERT INTO teams(id,event_id,name,leader_id,status,skills,description) VALUES('t-min','ev-sub','Equipe Solo','alice','forming','','')",
+  );
+  sql.exec("INSERT INTO team_members(team_id,event_id,user_id) VALUES('t-min','ev-sub','alice')");
+  as("alice");
+  const r = await post({ op: "team.submit", id: "t-min", url: "https://github.com/x/solo" });
+  assert.equal(r.status, 409);
+  assert.match(r.body.error, /pelo menos 2/);
+  // a página do evento mostra a minha equipe com os integrantes
+  as("bob");
+  const ev = (await get("event", "ev-sub")).body;
+  assert.equal(ev.myTeam.id, "t-sub");
+  assert.deepEqual(
+    ev.myTeam.people.map((p) => p.id),
+    ["bob", "carol"],
+  );
+  assert.ok((await get("bootstrap")).body.myTeams.some((m) => m.team_id === "t-sub"));
+  as("dave");
+  assert.equal((await get("event", "ev-sub")).body.myTeam ?? null, null);
+  sql.exec("UPDATE teams SET status='forming' WHERE id='t-sub'");
+  as("owner");
+  assert.equal((await post({ op: "team.confirm", id: "t-sub" })).status, 200);
 });
