@@ -42,9 +42,18 @@ npx wrangler secret put OPENAI_API_KEY --name hacko-platform   # opcional, para 
 
 O domínio `hacko.com.br` precisa estar **Active** na Cloudflare; o deploy cria os registros de `hacko.com.br` e `www.hacko.com.br`.
 
-## 3. Próximas publicações
+## 3. Próximas publicações (automáticas)
 
-`HACKO_D1_ID=<id> HACKO_DOMAIN=hacko.com.br pnpm deploy`, e `pnpm db:migrate:prod` sempre que houver migração nova em `drizzle/`.
+O GitHub Actions (`.github/workflows/deploy.yml`) roda testes, tipos e build em todo PR e, a cada merge na `main`,
+aplica as migrações do banco e publica em hacko.com.br. Configuração única, no repositório do GitHub em
+**Settings → Secrets and variables → Actions → New repository secret**:
+
+| Segredo | Onde obter |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | dash.cloudflare.com → My Profile → API Tokens → Create Token → modelo **Edit Cloudflare Workers**, adicionando a permissão **Account → D1 → Edit** |
+| `CLOUDFLARE_ACCOUNT_ID` | dash.cloudflare.com → Workers & Pages → **Account ID** (lado direito) |
+
+Publicação manual (emergência): `HACKO_D1_ID=<id> HACKO_DOMAIN=hacko.com.br pnpm deploy` e `pnpm db:migrate:prod`.
 
 ## Desenvolvimento local
 
