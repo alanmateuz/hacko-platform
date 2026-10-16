@@ -1,0 +1,1 @@
+ALTER TABLE `events` ADD `banner_color` text DEFAULT 'blue' NOT NULL;
