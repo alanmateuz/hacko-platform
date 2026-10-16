@@ -17,8 +17,9 @@ function Logo({ arrow = "var(--lime)" }: { arrow?: string }) {
     </span>
   );
 }
-function Pattern({ rows = 2 }: { rows?: number }) {
-  return <div className="lp-pattern" style={{ height: rows * 30 }} aria-hidden="true" />;
+// Faixa de setas da identidade, passando na horizontal.
+function Pattern() {
+  return <div className="lp-pattern" aria-hidden="true" />;
 }
 
 const LOGIN = "/#/login";
@@ -54,13 +55,6 @@ const PLANS = [
     cta: ["Falar com a equipe", "mailto:suporte@hacko.com.br?subject=Plano%20premium"],
     featured: true,
   },
-];
-
-// Anúncios fictícios até os primeiros parceiros entrarem.
-const ADS = [
-  { tag: "Patrocinado", title: "Nuvem Sul", text: "Créditos de cloud para equipes participantes de hackathons.", cta: "Saiba mais" },
-  { tag: "Parceiro", title: "Escola Byte", text: "Cursos rápidos de React, dados e IA com desconto para a comunidade hacko.", cta: "Ver cursos" },
-  { tag: "Patrocinado", title: "Café Commit", text: "Café especial para maratonas de código. Frete grátis para eventos.", cta: "Conhecer" },
 ];
 
 const FAQ = [
@@ -107,6 +101,18 @@ function Carousel() {
       clearInterval(t);
     };
   }, []);
+
+  // A faixa preta termina na linha entre a imagem e o texto dos cards.
+  useEffect(() => {
+    const img = track.current?.querySelector("img");
+    const band = track.current?.closest<HTMLElement>(".lp-band");
+    if (!img || !band) return;
+    const sync = () => band.style.setProperty("--cut", `${img.offsetTop + img.offsetHeight}px`);
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(img);
+    return () => ro.disconnect();
+  }, [events]);
 
   const count = events?.length || 0;
   const go = useCallback(
@@ -185,22 +191,38 @@ function Carousel() {
   );
 }
 
-function BrowserMock({ children, dark }: { children: React.ReactNode; dark?: boolean }) {
+// Prints reais da plataforma, recortados na borda da seção para dar profundidade.
+function Shot({ src, alt, className = "" }: { src: string; alt: string; className?: string }) {
   return (
-    <div className={"lp-browser" + (dark ? " dark" : "")} aria-hidden="true">
-      <div className="lp-browser-bar">
-        <Logo />
-        <i />
-        <i />
-        <i />
-      </div>
-      {children}
+    <div className={"lp-shot " + className} data-reveal>
+      <img src={src} alt={alt} loading="lazy" />
     </div>
   );
 }
 
+// Elementos com data-reveal sobem suavemente ao entrar na tela.
+function useReveal() {
+  useEffect(() => {
+    const els = document.querySelectorAll<HTMLElement>("[data-reveal]");
+    if (!("IntersectionObserver" in window)) return els.forEach((el) => el.classList.add("in"));
+    const io = new IntersectionObserver(
+      (entries) =>
+        entries.forEach((e) => {
+          if (e.isIntersecting) {
+            e.target.classList.add("in");
+            io.unobserve(e.target);
+          }
+        }),
+      { threshold: 0.15 },
+    );
+    els.forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, []);
+}
+
 export default function Landing() {
   const [menu, setMenu] = useState(false);
+  useReveal();
   return (
     <div className="lp">
       <header className="lp-nav">
@@ -212,11 +234,13 @@ export default function Landing() {
           <span />
         </button>
         <nav className={menu ? "open" : ""} onClick={() => setMenu(false)}>
-          {NAV.map(([id, label]) => (
-            <a key={id} href={`#${id}`}>
-              {label}
-            </a>
-          ))}
+          <div className="lp-nav-links">
+            {NAV.map(([id, label]) => (
+              <a key={id} href={`#${id}`}>
+                {label}
+              </a>
+            ))}
+          </div>
           <a className="lp-btn white sm" href={LOGIN}>
             Login <Arrow color="var(--blue)" />
           </a>
@@ -225,11 +249,11 @@ export default function Landing() {
 
       <section id="inicio" className="lp-hero">
         <div className="lp-wrap">
-          <h1>
+          <h1 data-reveal>
             O seu próximo <span className="lime">desafio</span> é aqui
           </h1>
           <div className="lp-hero-grid">
-            <div className="lp-hero-text">
+            <div className="lp-hero-text" data-reveal>
               <p className="lp-lead">Encontre hackathons, monte sua equipe e tire suas ideias do papel!</p>
               <a className="lp-btn white" href={LOGIN}>
                 Login <Arrow color="var(--blue)" />
@@ -241,71 +265,37 @@ export default function Landing() {
               <a className="lp-btn blue" href="#empresas">
                 Para empresas
               </a>
-              <a className="lp-btn white" href="#contato">
-                Contatos
-              </a>
             </div>
-            <BrowserMock>
-              <div className="lp-mock-hero">
-                <span className="lp-chip">HACKATHONS · EQUIPES · ENTREGAS</span>
-                <b>Seu próximo grande desafio começa aqui.</b>
-                <span className="lp-mock-btn">Encontrar minha equipe ↗</span>
-                <div className="lp-mock-arrows">
-                  <Arrow color="var(--lime)" />
-                  <Arrow color="var(--lime)" />
-                </div>
-              </div>
-              <div className="lp-mock-list">
-                <b>Hackathons para você</b>
-                <div className="lp-mock-filters">
-                  <i />
-                  <i />
-                  <i />
-                  <i />
-                </div>
-              </div>
-            </BrowserMock>
+            <Shot src="/landing/explorar.png" alt="Página Explorar do hacko com hackathons para você" className="bleed-right bleed-bottom" />
           </div>
         </div>
       </section>
 
       <section id="participantes" className="lp-part">
-        <div className="lp-part-top">
+        <div className="lp-wrap lp-part-top">
+          <div className="lp-head" data-reveal>
+            <h2>
+              Para participantes <Arrow color="var(--lime)" />
+            </h2>
+            <Logo />
+          </div>
+          <p className="lp-center" data-reveal>
+            No hacko, você encontra os hackathons acontecendo na sua cidade, podendo filtrar por presenciais, híbridos, online e pela data do evento.
+          </p>
+        </div>
+        <div className="lp-band">
           <div className="lp-wrap">
-            <div className="lp-head">
-              <h2>
-                Para participantes <Arrow color="var(--lime)" />
-              </h2>
-              <Logo />
-            </div>
-            <p className="lp-center">
-              No hacko, você encontra os hackathons acontecendo na sua cidade, podendo filtrar por presenciais, híbridos, online e pela data do evento.
-            </p>
+            <Carousel />
           </div>
         </div>
         <div className="lp-part-bottom">
           <div className="lp-wrap">
-            <Carousel />
-            <p className="lp-center">
+            <p className="lp-center" data-reveal>
               Após fazer login na plataforma, o participante pode buscar outros participantes no mesmo evento para formar equipes variadas e fazer networking!
             </p>
             <div className="lp-split">
-              <BrowserMock>
-                <div className="lp-mock-conn">
-                  <small>COMUNIDADE</small>
-                  <b>Sua próxima conexão.</b>
-                  <div className="lp-mock-people">
-                    {["Ana Martins", "Ian Santiago"].map((n) => (
-                      <div key={n}>
-                        <span className="lp-avatar">{n[0]}</span>
-                        <b>{n}</b>
-                        <small>Front-end · Dados</small>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </BrowserMock>
-              <div>
+              <Shot src="/landing/comunidade.png" alt="Página Comunidade do hacko com perfis de participantes" className="bleed-left bleed-bottom" />
+              <div className="lp-split-text" data-reveal>
                 <p className="lp-big">Interaja e faça parte de uma comunidade que adora inovar e botar a mão na massa!</p>
                 <p className="lp-big">Tudo isso fácil, rápido e de graça!</p>
                 <a className="lp-btn white" href={LOGIN}>
@@ -317,42 +307,16 @@ export default function Landing() {
         </div>
       </section>
 
-      <section className="lp-ads" aria-label="Anúncios">
-        <div className="lp-wrap">
-          <p className="lp-label dark">Anúncios e parceiros</p>
-          <div className="lp-ads-grid">
-            {ADS.map((a) => (
-              <article key={a.title} className="lp-ad">
-                <small>{a.tag}</small>
-                <b>{a.title}</b>
-                <p>{a.text}</p>
-                <span className="lp-ad-cta">
-                  {a.cta} <Arrow />
-                </span>
-              </article>
-            ))}
-            <a className="lp-ad lp-ad-own" href="mailto:suporte@hacko.com.br?subject=Anunciar%20no%20hacko">
-              <small>Sua marca aqui</small>
-              <b>Anuncie no hacko</b>
-              <p>Fale com quem cria, programa e inova em hackathons pelo Brasil.</p>
-              <span className="lp-ad-cta">
-                Quero anunciar <Arrow />
-              </span>
-            </a>
-          </div>
-        </div>
-      </section>
-
       <section id="empresas" className="lp-comp">
         <div className="lp-wrap">
-          <div className="lp-head">
+          <div className="lp-head" data-reveal>
             <h2>
               Para empresas <Arrow color="var(--lime)" />
             </h2>
             <Logo />
           </div>
-          <div className="lp-split">
-            <div>
+          <div className="lp-split reverse">
+            <div className="lp-split-text" data-reveal>
               <p>
                 No hacko, os participantes se inscrevem diretamente no seu hackathon, onde podem se organizar em equipes pelo próprio site de acordo com as regras estabelecidas por você!
               </p>
@@ -367,52 +331,14 @@ export default function Landing() {
                 </a>
               </div>
             </div>
-            <div className="lp-dash" aria-hidden="true">
-              <aside>
-                <Logo />
-                <i />
-                <i />
-                <i />
-                <i />
-              </aside>
-              <div>
-                <small>ORGANIZAÇÃO · PAINEL DO EVENTO</small>
-                <b>Tudo sob controle.</b>
-                <div className="lp-stats">
-                  {[
-                    ["Inscritos", "248"],
-                    ["Equipes", "52"],
-                    ["Entregas", "38"],
-                  ].map(([k, v]) => (
-                    <span key={k}>
-                      {k}
-                      <b>{v}</b>
-                    </span>
-                  ))}
-                </div>
-                <div className="lp-table">
-                  <small>Equipes e entregas</small>
-                  {[
-                    ["Pixel Norte", "Validada", "ok"],
-                    ["Code Rio", "Em validação", "wait"],
-                    ["Dados Vivos", "Aguardando envio", "none"],
-                    ["Nova Ágil", "Revisar envio", "fix"],
-                  ].map(([t, s, c]) => (
-                    <div key={t}>
-                      <span>{t}</span>
-                      <em className={c}>{s}</em>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+            <Shot src="/landing/painel.png" alt="Painel da organização com participantes, equipes e entregas" className="bleed-right bleed-bottom" />
           </div>
         </div>
       </section>
 
       <section id="planos" className="lp-plans">
         <div className="lp-wrap">
-          <div className="lp-head">
+          <div className="lp-head" data-reveal>
             <h2>
               Confira os planos <Arrow color="var(--blue)" />
             </h2>
@@ -420,7 +346,7 @@ export default function Landing() {
           </div>
           <div className="lp-plan-grid">
             {PLANS.map((p) => (
-              <article key={p.name} className={"lp-plan" + (p.featured ? " featured" : "")}>
+              <article key={p.name} className={"lp-plan" + (p.featured ? " featured" : "")} data-reveal>
                 <h3>{p.name}</h3>
                 <p className="lp-price">
                   {p.price} <small>{p.note}</small>
@@ -453,11 +379,11 @@ export default function Landing() {
       <section id="faq" className="lp-faq">
         <Pattern />
         <div className="lp-wrap narrow">
-          <h2>
+          <h2 data-reveal>
             Perguntas Frequentes <Arrow color="var(--lime)" />
           </h2>
           {FAQ.map(([q, a]) => (
-            <details key={q}>
+            <details key={q} data-reveal>
               <summary>
                 <Arrow color="var(--lime)" /> {q}
               </summary>
