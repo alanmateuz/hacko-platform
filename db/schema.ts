@@ -180,6 +180,25 @@ export const favorites = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.eventId, t.userId] })],
 );
+// Resultado do hackathon: 1º, 2º e 3º lugar. created_at abre a janela de 7 dias do cartão do pódio.
+export const placements = sqliteTable(
+  "placements",
+  {
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id),
+    place: integer("place").notNull(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.eventId, t.place] }),
+    uniqueIndex("placements_team").on(t.eventId, t.teamId),
+    check("placements_place", sql`${t.place} BETWEEN 1 AND 3`),
+  ],
+);
 export const aiUsage = sqliteTable(
   "ai_usage",
   {

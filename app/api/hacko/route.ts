@@ -146,6 +146,39 @@ const audit = (org: string, actor: string, action: string, target: string) =>
 const notify = (id: string, message: string) =>
   stmt("INSERT INTO notifications(id,user_id,message,created_at) VALUES(?,?,?,?)", uid(), id, message, now());
 const counts = `(SELECT updated_at FROM images WHERE id='cover:'||e.id) cover_v,(SELECT updated_at FROM images WHERE id='logo:'||e.org_id) logo_v,(SELECT count(*) FROM registrations r WHERE r.event_id=e.id AND r.status='active') participants,(SELECT count(*) FROM teams t WHERE t.event_id=e.id) teams`;
+// Pódio: o cartão dourado/prata/bronze vale por 7 dias após a publicação do resultado.
+const PODIUM_THEME: Record<number, string> = { 1: "gold", 2: "silver", 3: "bronze" };
+const PODIUM_FRESH = "strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 days')";
+const podiumOf = (p: string) =>
+  `SELECT 1 FROM placements pl JOIN team_members tm ON tm.team_id=pl.team_id WHERE tm.user_id=${p}.id`;
+// Tema efetivo: um tema do pódio vencido (ou sem pódio) volta para o azul. "podium" = já ficou no pódio.
+const themeOf = `CASE WHEN p.card_theme IN ('gold','silver','bronze') AND NOT EXISTS(${podiumOf("p")} AND pl.created_at>${PODIUM_FRESH} AND pl.place=(CASE p.card_theme WHEN 'gold' THEN 1 WHEN 'silver' THEN 2 ELSE 3 END)) THEN 'blue' ELSE p.card_theme END card_theme,EXISTS(${podiumOf("p")}) podium`;
+// Melhor colocação ainda dentro da janela de 7 dias (para liberar o tema no perfil).
+async function activePodium(userId: string) {
+  return one(
+    `SELECT pl.place,pl.created_at,e.title event_title FROM placements pl JOIN team_members tm ON tm.team_id=pl.team_id JOIN events e ON e.id=pl.event_id WHERE tm.user_id=? AND pl.created_at>${PODIUM_FRESH} ORDER BY pl.place,pl.created_at DESC LIMIT 1`,
+    userId,
+  );
+}
+// Ganhadores publicados, mais recentes primeiro, com os integrantes visíveis de cada equipe.
+async function winners() {
+  const events = await all(
+    `SELECT e.id,e.title,e.summary,e.banner_color,e.image,(SELECT updated_at FROM images WHERE id='cover:'||e.id) cover_v,max(pl.created_at) published_at FROM placements pl JOIN events e ON e.id=pl.event_id WHERE e.status='published' GROUP BY e.id ORDER BY published_at DESC LIMIT 6`,
+  );
+  for (const e of events) {
+    const places = await all(
+      "SELECT pl.place,t.id team_id,t.name team_name FROM placements pl JOIN teams t ON t.id=pl.team_id WHERE pl.event_id=? ORDER BY pl.place",
+      e.id,
+    );
+    for (const pl of places)
+      pl.members = await all(
+        "SELECT p.id,p.name,p.bio,p.skills,p.city,p.linkedin,p.github,p.portfolio,p.instagram,p.school,p.workplace,p.area,(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v FROM team_members m JOIN profiles p ON p.id=m.user_id WHERE m.team_id=? AND p.visible=1 ORDER BY p.name",
+        pl.team_id,
+      );
+    e.places = places;
+  }
+  return events;
+}
 async function eligible(eventId: string) {
   return all(
     `SELECT p.id,p.name,p.skills,p.availability FROM profiles p JOIN registrations r ON r.user_id=p.id WHERE r.event_id=? AND r.status='active' AND NOT EXISTS(SELECT 1 FROM team_members m WHERE m.user_id=p.id AND m.event_id=r.event_id) ORDER BY p.id`,
@@ -157,7 +190,7 @@ function snap(e: any, p: any[]) {
 }
 async function teamRows(eventId?: string) {
   return all(
-    `SELECT t.*,e.title event_title,e.team_min,e.team_max,e.starts_at,(SELECT count(*) FROM team_members m WHERE m.team_id=t.id) members FROM teams t JOIN events e ON e.id=t.event_id WHERE e.status='published' ${eventId ? "AND t.event_id=?" : ""} ORDER BY t.name`,
+    `SELECT t.*,e.title event_title,e.city event_city,e.team_min,e.team_max,e.starts_at,(SELECT count(*) FROM team_members m WHERE m.team_id=t.id) members FROM teams t JOIN events e ON e.id=t.event_id WHERE e.status='published' ${eventId ? "AND t.event_id=?" : ""} ORDER BY t.name`,
     ...(eventId ? [eventId] : []),
   );
 }
@@ -212,6 +245,7 @@ export async function GET(request: Request) {
               accountType: user.accountType || "participant",
             }
           : null,
+        podium: user ? await activePodium(user.userId) : null,
         profile: user
           ? await one(
               "SELECT p.*,(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v FROM profiles p WHERE id=?",
@@ -272,7 +306,7 @@ export async function GET(request: Request) {
           : null,
         teams: await teamRows(id),
         participants: await all(
-          `SELECT p.id,p.name,p.skills,p.bio,p.city,p.availability,p.linkedin,p.github,p.portfolio,p.instagram,p.school,p.workplace,p.area,p.card_theme,(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v,EXISTS(SELECT 1 FROM team_members m WHERE m.user_id=p.id AND m.event_id=r.event_id) in_team FROM profiles p JOIN registrations r ON r.user_id=p.id WHERE r.event_id=? AND r.status='active' AND p.visible=1`,
+          `SELECT p.id,p.name,p.skills,p.bio,p.city,p.availability,p.linkedin,p.github,p.portfolio,p.instagram,p.school,p.workplace,p.area,${themeOf},(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v,EXISTS(SELECT 1 FROM team_members m WHERE m.user_id=p.id AND m.event_id=r.event_id) in_team FROM profiles p JOIN registrations r ON r.user_id=p.id WHERE r.event_id=? AND r.status='active' AND p.visible=1`,
           id,
         ),
       });
@@ -281,8 +315,10 @@ export async function GET(request: Request) {
     if (action === "participants")
       return json({
         participants: await all(
-          "SELECT p.id,p.name,p.bio,p.skills,p.city,p.availability,p.linkedin,p.github,p.portfolio,p.instagram,p.school,p.workplace,p.area,p.card_theme,(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v FROM profiles p WHERE visible=1 ORDER BY name LIMIT 500",
+          `SELECT p.id,p.name,p.bio,p.skills,p.city,p.availability,p.linkedin,p.github,p.portfolio,p.instagram,p.school,p.workplace,p.area,${themeOf},(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v,(SELECT group_concat(e.title,' | ') FROM registrations r JOIN events e ON e.id=r.event_id WHERE r.user_id=p.id AND r.status='active' AND e.status='published') hackathons FROM profiles p WHERE visible=1 ORDER BY name LIMIT 500`,
         ),
+        teams: await teamRows(),
+        winners: await winners(),
       });
     const u = await auth();
     if (action === "team") {
@@ -372,6 +408,7 @@ export async function GET(request: Request) {
       const cover = await one("SELECT updated_at FROM images WHERE id=?", "cover:" + id);
       return json({
         event: { ...e, cover_v: cover?.updated_at || null },
+        placements: await all("SELECT place,team_id,created_at FROM placements WHERE event_id=? ORDER BY place", id),
         registrations: await all(
           "SELECT r.*,p.name,p.email,p.skills,p.availability,p.city,p.bio,p.linkedin,p.github,m.team_id FROM registrations r JOIN profiles p ON p.id=r.user_id LEFT JOIN team_members m ON m.user_id=r.user_id AND m.event_id=r.event_id WHERE r.event_id=?",
           id,
@@ -490,6 +527,7 @@ export async function POST(request: Request) {
         stmt(`DELETE FROM team_requests WHERE team_id IN (${evTeams})`, uidv),
         stmt(`DELETE FROM team_members WHERE event_id IN (${orgEvents})`, uidv),
         stmt(`DELETE FROM delivery_items WHERE team_id IN (${evTeams})`, uidv),
+        stmt(`DELETE FROM placements WHERE event_id IN (${orgEvents})`, uidv),
         stmt(`DELETE FROM teams WHERE event_id IN (${orgEvents})`, uidv),
         stmt(`DELETE FROM registrations WHERE event_id IN (${orgEvents})`, uidv),
         stmt(`DELETE FROM favorites WHERE event_id IN (${orgEvents})`, uidv),
@@ -501,6 +539,7 @@ export async function POST(request: Request) {
         stmt(`DELETE FROM team_requests WHERE user_id=? OR team_id IN (${myTeams})`, uidv, uidv),
         stmt(`DELETE FROM team_members WHERE user_id=? OR team_id IN (${myTeams})`, uidv, uidv),
         stmt("DELETE FROM delivery_items WHERE team_id IN (SELECT id FROM teams WHERE leader_id=?)", uidv),
+        stmt("DELETE FROM placements WHERE team_id IN (SELECT id FROM teams WHERE leader_id=?)", uidv),
         stmt("DELETE FROM teams WHERE leader_id=?", uidv),
         stmt("DELETE FROM registrations WHERE user_id=?", uidv),
         stmt("DELETE FROM favorites WHERE user_id=?", uidv),
@@ -531,6 +570,12 @@ export async function POST(request: Request) {
     }
     if (op === "profile") {
       const p = profileSchema.parse(body.data);
+      // Tema do pódio só para quem ficou nessa colocação nos últimos 7 dias.
+      if (["gold", "silver", "bronze"].includes(p.card_theme)) {
+        const pod = await activePodium(u.userId);
+        if (!pod || PODIUM_THEME[pod.place] !== p.card_theme)
+          fail("Este cartão é exclusivo do pódio e fica disponível por 7 dias após o resultado.", 403);
+      }
       await stmt(
         `INSERT INTO profiles(id,name,email,bio,skills,interests,city,availability,linkedin,github,visible,portfolio,instagram,school,workplace,area,card_theme) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,bio=excluded.bio,skills=excluded.skills,interests=excluded.interests,city=excluded.city,availability=excluded.availability,linkedin=excluded.linkedin,github=excluded.github,visible=excluded.visible,portfolio=excluded.portfolio,instagram=excluded.instagram,school=excluded.school,workplace=excluded.workplace,area=excluded.area,card_theme=excluded.card_theme`,
         u.userId,
@@ -636,6 +681,44 @@ export async function POST(request: Request) {
       }
       return json({ id: eventId });
     }
+    if (op === "event.results") {
+      // Resultado: equipes em 1º, 2º e 3º lugar (o 3º é opcional). Republicar substitui o anterior.
+      const e = await ownEvent(id, u.userId);
+      if (e.status !== "published") fail("Publique o evento antes de divulgar o resultado.");
+      if (now() < e.starts_at) fail("O resultado só pode ser publicado depois do início do evento.");
+      const picks = (Array.isArray(body.places) ? body.places : []).map((v: any) => String(v || "")).slice(0, 3);
+      if (!picks[0] || !picks[1]) fail("Escolha pelo menos as equipes em 1º e 2º lugar.");
+      const chosen = picks.filter(Boolean);
+      if (new Set(chosen).size !== chosen.length) fail("Uma equipe não pode ocupar duas posições.");
+      const valid = await all(
+        `SELECT id,name FROM teams WHERE event_id=? AND id IN (${chosen.map(() => "?").join(",")})`,
+        id,
+        ...chosen,
+      );
+      if (valid.length !== chosen.length) fail("Equipe inválida para este evento.");
+      const at = now();
+      const statements = [stmt("DELETE FROM placements WHERE event_id=?", id)];
+      for (const [i, teamId] of picks.entries()) {
+        if (!teamId) continue;
+        const place = i + 1,
+          team = valid.find((t) => t.id === teamId);
+        statements.push(
+          stmt("INSERT INTO placements(event_id,place,team_id,created_at) VALUES(?,?,?,?)", id, place, teamId, at),
+        );
+        for (const m of await all("SELECT user_id FROM team_members WHERE team_id=?", teamId))
+          statements.push(
+            notify(
+              m.user_id,
+              `Sua equipe ${team.name} ficou em ${place}º lugar no ${e.title}! O cartão ${
+                ["", "dourado", "prata", "bronze"][place]
+              } está liberado no seu perfil por 7 dias.`,
+            ),
+          );
+      }
+      statements.push(audit(e.org_id, u.userId, "event.results", id));
+      await db().batch(statements);
+      return json({ ok: true });
+    }
     if (op === "event.publish" || op === "event.archive" || op === "event.duplicate") {
       const e = await ownEvent(id, u.userId);
       if (op === "event.duplicate") {
@@ -735,6 +818,7 @@ export async function POST(request: Request) {
               stmt("DELETE FROM team_requests WHERE team_id=?", myTeam.id),
               stmt("DELETE FROM team_members WHERE team_id=?", myTeam.id),
               stmt("DELETE FROM delivery_items WHERE team_id=?", myTeam.id),
+              stmt("DELETE FROM placements WHERE team_id=?", myTeam.id),
               stmt("DELETE FROM teams WHERE id=?", myTeam.id),
             ]
           : [
@@ -1006,6 +1090,7 @@ export async function POST(request: Request) {
           stmt("DELETE FROM team_requests WHERE team_id=?", id),
           stmt("DELETE FROM team_members WHERE team_id=?", id),
           stmt("DELETE FROM delivery_items WHERE team_id=?", id),
+          stmt("DELETE FROM placements WHERE team_id=?", id),
           stmt("DELETE FROM teams WHERE id=?", id),
           ...ms.map((m) => notify(m.user_id, "Equipe " + t.name + " dissolvida pelo líder.")),
         ]);

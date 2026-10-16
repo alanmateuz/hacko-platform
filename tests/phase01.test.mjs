@@ -811,3 +811,36 @@ test("entregas: anexos (fotos, PDF, links), envio e validação", async () => {
   assert.ok(![...r2.keys()].some((k) => k.startsWith("deliveries/t-files/")));
   sql.exec("UPDATE events SET starts_at='" + day(-1) + "' WHERE id='ev-sub'");
 });
+
+test("pódio: resultado do hackathon e cartão dourado por 7 dias", async () => {
+  // ev-sub já começou; t-sub (bob, carol) e t-min (alice) são equipes do evento
+  as("bob");
+  const before = (await post({ op: "profile", data: { name: "Bob", bio: "", skills: "", interests: "", city: "", availability: "", linkedin: "", github: "", visible: true, card_theme: "gold" } })).status;
+  assert.equal(before, 403); // sem pódio, sem cartão dourado
+  as("alice");
+  assert.equal((await post({ op: "event.results", id: "ev-sub", places: ["t-sub", "t-min"] })).status, 403); // só a organização
+  as("owner");
+  assert.equal((await post({ op: "event.results", id: "ev-sub", places: ["t-sub", "t-sub"] })).status, 400); // repetida
+  assert.equal((await post({ op: "event.results", id: "ev-sub", places: ["t-sub", "t-min", ""] })).status, 200);
+  assert.deepEqual(
+    sql.prepare("SELECT place,team_id FROM placements WHERE event_id='ev-sub' ORDER BY place").all().map((r) => [r.place, r.team_id]),
+    [[1, "t-sub"], [2, "t-min"]],
+  );
+  as("bob");
+  const boot = (await get("bootstrap")).body;
+  assert.equal(boot.podium.place, 1);
+  assert.ok(boot.notifications.some((n) => /1º lugar/.test(n.message)));
+  const prof = { name: "Bob", bio: "", skills: "", interests: "", city: "", availability: "", linkedin: "", github: "", visible: true };
+  assert.equal((await post({ op: "profile", data: { ...prof, card_theme: "silver" } })).status, 403); // prata é do 2º
+  assert.equal((await post({ op: "profile", data: { ...prof, card_theme: "gold" } })).status, 200);
+  let people = (await get("participants")).body;
+  assert.equal(people.participants.find((p) => p.id === "bob").card_theme, "gold");
+  assert.equal(people.winners[0].id, "ev-sub");
+  assert.deepEqual(people.winners[0].places.map((p) => p.team_id), ["t-sub", "t-min"]);
+  // passados 7 dias o cartão volta para o azul
+  sql.exec("UPDATE placements SET created_at='2000-01-01T00:00:00.000Z'");
+  people = (await get("participants")).body;
+  assert.equal(people.participants.find((p) => p.id === "bob").card_theme, "blue");
+  assert.equal(people.participants.find((p) => p.id === "bob").podium, 1);
+  assert.equal((await get("bootstrap")).body.podium ?? null, null);
+});
