@@ -272,7 +272,7 @@ export async function GET(request: Request) {
           : null,
         teams: await teamRows(id),
         participants: await all(
-          `SELECT p.id,p.name,p.skills,p.bio,p.city,p.availability,p.linkedin,p.github,p.portfolio,p.instagram,p.school,p.workplace,p.area,p.card_theme,(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v FROM profiles p JOIN registrations r ON r.user_id=p.id WHERE r.event_id=? AND r.status='active' AND p.visible=1`,
+          `SELECT p.id,p.name,p.skills,p.bio,p.city,p.availability,p.linkedin,p.github,p.portfolio,p.instagram,p.school,p.workplace,p.area,p.card_theme,(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v,EXISTS(SELECT 1 FROM team_members m WHERE m.user_id=p.id AND m.event_id=r.event_id) in_team FROM profiles p JOIN registrations r ON r.user_id=p.id WHERE r.event_id=? AND r.status='active' AND p.visible=1`,
           id,
         ),
       });
@@ -778,7 +778,7 @@ export async function POST(request: Request) {
         fail("Você já faz parte de uma equipe neste evento.", 409);
       await db().batch([
         stmt(
-          "INSERT INTO teams(id,event_id,leader_id,name,skills,description,card_theme) VALUES(?,?,?,?,?,?,?)",
+          "INSERT INTO teams(id,event_id,leader_id,name,skills,description,card_theme,areas) VALUES(?,?,?,?,?,?,?,?)",
           tid,
           d.event_id,
           u.userId,
@@ -786,6 +786,7 @@ export async function POST(request: Request) {
           d.skills,
           d.description,
           d.card_theme,
+          d.areas,
         ),
         memberGuard(tid, d.event_id, u.userId),
         stmt("INSERT INTO team_members(team_id,event_id,user_id) VALUES(?,?,?)", tid, d.event_id, u.userId),

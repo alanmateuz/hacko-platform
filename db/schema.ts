@@ -89,6 +89,8 @@ export const teams = sqliteTable("teams", {
   description: text("description").notNull().default(""),
   status: text("status").notNull().default("forming"),
   cardTheme: text("card_theme").notNull().default("blue"),
+  // Áreas que a equipe procura (DEV, DESIGN, MARKETING, NEGÓCIOS), separadas por vírgula.
+  areas: text("areas").notNull().default(""),
   // Entrega do projeto: none | submitted | reviewing | evaluated | pending.
   submissionStatus: text("submission_status").notNull().default("none"),
   submissionUrl: text("submission_url").notNull().default(""),

@@ -210,10 +210,20 @@ test("fase 01: autenticação, isolamento e jornada de evento/equipe", async () 
   const publiclyVisible = (await get("event", event)).body.participants;
   assert.ok(!publiclyVisible.some((p) => p.id === "carol"));
   assert.ok(publiclyVisible.every((p) => !("email" in p)));
+  // descrição da equipe é obrigatória
+  assert.equal(
+    (
+      await post({
+        op: "team.create",
+        data: { event_id: event, name: "Equipe teste", skills: "React", description: "  " },
+      })
+    ).status,
+    400,
+  );
   team = (
     await post({
       op: "team.create",
-      data: { event_id: event, name: "Equipe teste", skills: "React", description: "" },
+      data: { event_id: event, name: "Equipe teste", skills: "React", description: "Time de React" },
     })
   ).body.id;
   assert.ok(team);
@@ -221,7 +231,7 @@ test("fase 01: autenticação, isolamento e jornada de evento/equipe", async () 
     (
       await post({
         op: "team.create",
-        data: { event_id: event, name: "Outra equipe", skills: "", description: "" },
+        data: { event_id: event, name: "Outra equipe", skills: "", description: "Outra ideia" },
       })
     ).status,
     409,

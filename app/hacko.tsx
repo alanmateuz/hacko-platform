@@ -203,11 +203,88 @@ function SocialIcon({ kind }: { kind: string }) {
   if (kind === "github") return <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.86c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.89 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.26-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03a9.6 9.6 0 0 1 5 0c1.91-1.3 2.75-1.03 2.75-1.03.55 1.38.2 2.39.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.76c0 .26.18.58.69.48A10 10 0 0 0 12 2"/></svg>;
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">{kind === "instagram" ? <><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></> : <><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18M5 6h14M5 18h14"/></>}</svg>;
 }
-function Person({ p }: any) {
+const AREAS = ["DEV", "DESIGN", "MARKETING", "NEGÓCIOS"];
+const teamAreas = (t: Row) => String(t.areas || "").split(",").filter(Boolean);
+// Filtro por área (stack) usado nos participantes e equipes do hackathon.
+function AreaFilter({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="area-filter" role="group" aria-label="Filtrar por área">
+      {["", ...AREAS].map((a) => (
+        <button
+          key={a || "all"}
+          type="button"
+          className={"area-chip" + (value === a ? " on" : "")}
+          aria-pressed={value === a}
+          onClick={() => onChange(a)}
+        >
+          {a || "Todas"}
+        </button>
+      ))}
+    </div>
+  );
+}
+// Linha rolável na horizontal: até 3 blocos visíveis, setas para os demais.
+function ScrollRow({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ start: true, end: true });
+  const sync = () => {
+    const el = ref.current;
+    if (!el) return;
+    const start = el.scrollLeft <= 4,
+      end = el.scrollLeft + el.clientWidth >= el.scrollWidth - 4;
+    setEdges((e) => (e.start === start && e.end === end ? e : { start, end }));
+  };
+  useEffect(sync);
+  const move = (dir: number) => ref.current?.scrollBy({ left: dir * ref.current.clientWidth, behavior: "smooth" });
+  return (
+    <div className="scroll-row">
+      <button type="button" className="scroll-btn" aria-label="Anteriores" disabled={edges.start} onClick={() => move(-1)}>
+        ‹
+      </button>
+      <div className="scroll-track" ref={ref} onScroll={sync}>
+        {children}
+      </div>
+      <button type="button" className="scroll-btn" aria-label="Próximos" disabled={edges.end} onClick={() => move(1)}>
+        ›
+      </button>
+    </div>
+  );
+}
+function AreaPicker() {
+  const [sel, setSel] = useState<string[]>([]);
+  return (
+    <fieldset className="area-picker">
+      <legend>Áreas que a equipe procura</legend>
+      <div className="area-filter">
+        {AREAS.map((a) => (
+          <button
+            key={a}
+            type="button"
+            className={"area-chip" + (sel.includes(a) ? " on" : "")}
+            aria-pressed={sel.includes(a)}
+            onClick={() => setSel(sel.includes(a) ? sel.filter((x) => x !== a) : [...sel, a])}
+          >
+            {a}
+          </button>
+        ))}
+      </div>
+      <input type="hidden" name="areas" value={sel.join(",")} />
+      <small>Usado no filtro de equipes do hackathon.</small>
+    </fieldset>
+  );
+}
+// inEvent: bloco dentro do hackathon (sem a seta do canto, como no Canva).
+function Person({ p, onInvite, inEvent }: { p: Row; onInvite?: () => void; inEvent?: boolean }) {
   return <article className={"profile-block theme-" + (p.card_theme === "lime" ? "lime" : "blue")}>
     <div className="profile-block-head">
-      <span className="profile-motif" aria-hidden="true"><Arrow size="22" /></span>
-      {p.area && <span className="profile-area">{p.area}</span>}
+      {!inEvent && <span className="profile-motif" aria-hidden="true"><Arrow size="22" /></span>}
+      {onInvite ? (
+        <button type="button" className="profile-invite" onClick={onInvite}>
+          CONVIDAR <Arrow />
+        </button>
+      ) : (
+        p.area && <span className="profile-area">{p.area}</span>
+      )}
       <Avatar p={p} />
       <div className="profile-identity"><h3>{p.name || "Seu nome"}</h3><small>{p.city || "Sua cidade"}</small></div>
     </div>
@@ -1793,14 +1870,15 @@ function Card({ e, registration }: any) {
     <div className="card-body"><p className="event-organization">{e.organization}</p><h3>{e.title}</h3><p className="event-date">{date(e.starts_at)}</p><p className="event-address">{[e.city, e.venue].filter(Boolean).join(" — ")}</p><div className="tags"><span className="tag">{e.format}</span><span className="tag">{e.theme}</span></div></div>
   </a></article>;
 }
-function Teams({ items = [] }: any) {
-  return items.length ? <div className="grid">{items.map((t: Row) => {
+function Teams({ items = [], row = false }: any) {
+  const Wrap = row ? ScrollRow : ({ children }: { children: ReactNode }) => <div className="grid">{children}</div>;
+  return items.length ? <Wrap>{items.map((t: Row) => {
     const complete = t.status === "confirmed" || (t.members != null && t.team_max != null && t.members >= t.team_max);
     return <article className={"team-block theme-" + (t.card_theme === "lime" ? "lime" : "blue")} key={t.id}><a href={href("/team/" + t.id)} aria-label={"Ver equipe " + t.name}>
       <div className="team-block-head"><span>{t.event_title}</span><Arrow size="25"/></div>
-      <div className="team-block-body"><div className="team-block-status"><span className="tag">{status(t.status)}</span>{t.members != null && <span className="team-count" aria-label={t.members + " de " + t.team_max + " integrantes"}>{t.members}/{t.team_max}</span>}</div><div className="team-block-description"><h3>{t.name}</h3><p>{t.description}</p></div><div className="team-block-needs">{complete ? <strong>Equipe completa!</strong> : <><span>Procuramos:</span><div className="tags">{t.skills ? tags(t.skills) : <span className="tag">Novos integrantes</span>}</div></>}</div></div>
+      <div className="team-block-body"><div className="team-block-status"><span className="tag">{status(t.status)}</span>{t.members != null && <span className="team-count" aria-label={t.members + " de " + t.team_max + " integrantes"}>{t.members}/{t.team_max}</span>}</div><div className="team-block-description"><h3>{t.name}</h3>{t.description?.trim() && <p>{t.description}</p>}</div><div className="team-block-needs">{complete ? <strong>Equipe completa!</strong> : <><span>Procuramos:</span><div className="tags">{teamAreas(t).length ? teamAreas(t).map((a) => <span className="tag" key={a}>{a}</span>) : t.skills ? tags(t.skills) : <span className="tag">Novos integrantes</span>}</div></>}</div></div>
     </a></article>;
-  })}</div> : <div className="empty">Nenhuma equipe encontrada.</div>;
+  })}</Wrap> : <div className="empty">Nenhuma equipe encontrada.</div>;
 }
 const blankProfile = {
   name: "",
@@ -1825,6 +1903,8 @@ export default function Hacko() {
     [message, setMessage] = useState(""),
     [filters, setFilters] = useState<Row>({}),
     [query, setQuery] = useState(""),
+    [teamArea, setTeamArea] = useState(""),
+    [personArea, setPersonArea] = useState(""),
     [radar, setRadar] = useState<Row | null>(null);
   const generation = useRef(0);
   const parts = route.split("/"),
@@ -2567,12 +2647,41 @@ export default function Hacko() {
           <div className="section-head">
             <h2>Equipes do evento</h2>
           </div>
-          <Teams items={data.teams} />
+          <AreaFilter value={teamArea} onChange={setTeamArea} />
+          <Teams row items={(data.teams || []).filter((t: Row) => !teamArea || teamAreas(t).includes(teamArea))} />
           <div className="section-head">
             <h2>Conheça participantes</h2>
             <small>Perfis com visibilidade ativada</small>
           </div>
-          <div className="grid">{data.participants?.map((p: Row) => <Person key={p.id} p={p} />)}</div>
+          <AreaFilter value={personArea} onChange={setPersonArea} />
+          <ScrollRow>
+            {(data.participants || [])
+              .filter((p: Row) => !personArea || p.area === personArea)
+              .map((p: Row) => {
+                // Convidar: só o líder de uma equipe em formação deste evento, para quem ainda não tem equipe.
+                const t = data.myTeam;
+                const canInvite =
+                  t && t.leader_id === boot.user?.id && t.status === "forming" && !p.in_team && p.id !== boot.user?.id;
+                return (
+                  <Person
+                    key={p.id}
+                    p={p}
+                    inEvent
+                    onInvite={
+                      canInvite
+                        ? async () => {
+                            if (await askConfirm(`Convidar ${p.name} para a equipe ${t.name}?`))
+                              mutate({ op: "team.invite", id: t.id, userId: p.id });
+                          }
+                        : undefined
+                    }
+                  />
+                );
+              })}
+          </ScrollRow>
+          {!!personArea && !(data.participants || []).some((p: Row) => p.area === personArea) && (
+            <div className="empty">Nenhum participante nesta área.</div>
+          )}
         </>
       );
     }
@@ -2593,10 +2702,13 @@ export default function Hacko() {
               placeholder="Java, design, produto…"
             />
           </label>
+          <AreaFilter value={teamArea} onChange={setTeamArea} />
           <Teams
             items={(data.teams || []).filter(
               (t: Row) =>
-                (!id || t.event_id === id) && normalize(t.name + " " + t.skills).includes(normalize(query)),
+                (!id || t.event_id === id) &&
+                (!teamArea || teamAreas(t).includes(teamArea)) &&
+                normalize(t.name + " " + t.skills).includes(normalize(query)),
             )}
           />
         </>
@@ -2711,7 +2823,14 @@ export default function Hacko() {
                 }
               >
                 <Field name="name" label="Nome da equipe" required />
-                <Field name="description" label="O que vocês querem construir?" type="textarea" />
+                <Field
+                  name="description"
+                  label="Descrição da equipe"
+                  type="textarea"
+                  required
+                  help="Obrigatória, nem que seja breve: o que vocês querem construir?"
+                />
+                <AreaPicker />
                 <Field name="skills" label="Competências que procuram" />
                 <ThemePicker team />
                 <small>Apenas uma equipe por participante em cada evento.</small>
