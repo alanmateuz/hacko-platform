@@ -224,7 +224,7 @@ function AreaFilter({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 // Linha rolável na horizontal: até 3 blocos visíveis, setas para os demais.
-function ScrollRow({ children }: { children: ReactNode }) {
+function ScrollRow({ children, per = 3 }: { children: ReactNode; per?: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ start: true, end: true });
   const sync = () => {
@@ -237,7 +237,7 @@ function ScrollRow({ children }: { children: ReactNode }) {
   useEffect(sync);
   const move = (dir: number) => ref.current?.scrollBy({ left: dir * ref.current.clientWidth, behavior: "smooth" });
   return (
-    <div className="scroll-row">
+    <div className="scroll-row" style={{ "--per": per } as React.CSSProperties}>
       <button type="button" className="scroll-btn" aria-label="Anteriores" disabled={edges.start} onClick={() => move(-1)}>
         ‹
       </button>
@@ -248,6 +248,188 @@ function ScrollRow({ children }: { children: ReactNode }) {
         ›
       </button>
     </div>
+  );
+}
+// "13 - 15 de outubro" (ou "30 de set. - 2 de out." quando muda o mês).
+function dayRange(a: string, b: string) {
+  const s = new Date(a),
+    e = new Date(b),
+    month = (d: Date) => d.toLocaleDateString("pt-BR", { month: "long" });
+  if (s.toDateString() === e.toDateString()) return `${s.getDate()} de ${month(s)}`;
+  if (s.getMonth() === e.getMonth()) return `${s.getDate()} - ${e.getDate()} de ${month(e)}`;
+  const short = (d: Date) => d.toLocaleDateString("pt-BR", { day: "numeric", month: "short" });
+  return `${short(s)} - ${short(e)}`;
+}
+// Cores do banner do hackathon: fundo, texto e destaque (selo e botão) com contraste garantido.
+const BANNER_COLORS: Record<string, { label: string; bg: string; ink: string; accent: string; accentInk: string }> = {
+  blue: { label: "Azul hacko", bg: "#0367fc", ink: "#ffffff", accent: "#d2f801", accentInk: "#161616" },
+  lime: { label: "Verde-limão", bg: "#d2f801", ink: "#161616", accent: "#161616", accentInk: "#ffffff" },
+  ink: { label: "Preto", bg: "#161616", ink: "#ffffff", accent: "#d2f801", accentInk: "#161616" },
+  purple: { label: "Roxo", bg: "#5b2ee0", ink: "#ffffff", accent: "#d2f801", accentInk: "#161616" },
+  orange: { label: "Laranja", bg: "#f2541b", ink: "#ffffff", accent: "#161616", accentInk: "#ffffff" },
+  green: { label: "Verde", bg: "#0b7a4b", ink: "#ffffff", accent: "#d2f801", accentInk: "#161616" },
+  pink: { label: "Rosa", bg: "#e0307a", ink: "#ffffff", accent: "#161616", accentInk: "#ffffff" },
+};
+// Cor personalizada (#rrggbb): texto preto ou branco conforme a luminância, destaque com contraste.
+function customBanner(hex: string) {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const light = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b) > 0.179;
+  return light
+    ? { label: "Personalizada", bg: hex, ink: "#161616", accent: "#161616", accentInk: "#ffffff" }
+    : { label: "Personalizada", bg: hex, ink: "#ffffff", accent: "#d2f801", accentInk: "#161616" };
+}
+const bannerStyle = (key?: string) => {
+  const c = /^#[0-9a-f]{6}$/i.test(key || "") ? customBanner(key!) : BANNER_COLORS[key || "blue"] || BANNER_COLORS.blue;
+  return {
+    "--banner-bg": c.bg,
+    "--banner-ink": c.ink,
+    "--banner-accent": c.accent,
+    "--banner-accent-ink": c.accentInk,
+  } as React.CSSProperties;
+};
+function BannerColorPicker({ value = "blue", title }: { value?: string; title?: string }) {
+  const [color, setColor] = useState(value || "blue");
+  const isCustom = color.startsWith("#");
+  const [custom, setCustom] = useState(isCustom ? color : "#0367fc");
+  return (
+    <fieldset className="banner-picker">
+      <legend>Cor do banner na página inicial</legend>
+      <input type="hidden" name="banner_color" value={color} />
+      <div className="banner-swatches" role="radiogroup">
+        {Object.entries(BANNER_COLORS).map(([k, c]) => (
+          <label key={k} className={"banner-swatch" + (color === k ? " selected" : "")} title={c.label}>
+            <input type="radio" name="banner_choice" checked={color === k} onChange={() => setColor(k)} />
+            <span style={{ background: c.bg, borderColor: c.accent }} aria-hidden="true" />
+            {c.label}
+          </label>
+        ))}
+      </div>
+      <div className={"banner-custom" + (isCustom ? " selected" : "")}>
+        <label className="banner-custom-pick" title="Escolher cor personalizada">
+          <input
+            type="color"
+            value={custom}
+            onChange={(e) => {
+              setCustom(e.target.value);
+              setColor(e.target.value);
+            }}
+          />
+          <span>Cores personalizadas</span>
+        </label>
+        <input
+          className="banner-custom-hex"
+          aria-label="Código da cor (hexadecimal)"
+          value={custom}
+          maxLength={7}
+          onChange={(e) => {
+            const v = e.target.value.startsWith("#") ? e.target.value : "#" + e.target.value;
+            setCustom(v);
+            if (/^#[0-9a-f]{6}$/i.test(v)) setColor(v.toLowerCase());
+          }}
+        />
+        {!isCustom && (
+          <button type="button" className="secondary" onClick={() => setColor(custom)}>
+            Usar esta cor
+          </button>
+        )}
+      </div>
+      <div className="banner-preview" style={bannerStyle(color)} aria-hidden="true">
+        <span className="pill">SEU PRÓXIMO DESAFIO</span>
+        <b>{title || "Nome do seu hackathon"}</b>
+        <span className="banner-preview-btn">Se inscrever</span>
+      </div>
+    </fieldset>
+  );
+}
+// Banner rotativo da página inicial: um hackathon por vez, priorizando os que estão acontecendo.
+function HeroCarousel({ events }: { events: Row[] }) {
+  const now = new Date().toISOString();
+  const rank = (e: Row) => (e.starts_at <= now ? 0 : e.opens_at <= now && e.closes_at > now ? 1 : 2);
+  const slides = events
+    .filter((e) => e.ends_at > now)
+    // Oficiais da hacko primeiro; os de fora só completam o banner quando faltam oficiais.
+    .sort((a, b) => (a.external ? 1 : 0) - (b.external ? 1 : 0) || rank(a) - rank(b) || a.starts_at.localeCompare(b.starts_at))
+    .slice(0, 6);
+  const [i, setI] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const touch = useRef(0);
+  const n = slides.length;
+  useEffect(() => {
+    if (paused || n < 2) return;
+    const t = setTimeout(() => setI((v) => (v + 1) % n), 6000);
+    return () => clearTimeout(t);
+  }, [i, paused, n]);
+  if (!n) return null;
+  const go = (v: number) => setI((v + n) % n);
+  return (
+    <section
+      className="hero-carousel"
+      aria-roledescription="carrossel"
+      aria-label="Hackathons em destaque"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+    >
+      <div className="hero-carousel-row">
+        <button type="button" className="scroll-btn" aria-label="Hackathon anterior" disabled={n < 2} onClick={() => go(i - 1)}>
+          ‹
+        </button>
+        <div
+          className="hero-viewport"
+          onTouchStart={(ev) => (touch.current = ev.touches[0].clientX)}
+          onTouchEnd={(ev) => {
+            const dx = ev.changedTouches[0].clientX - touch.current;
+            if (Math.abs(dx) > 40) go(dx < 0 ? i + 1 : i - 1);
+          }}
+        >
+          <div className="hero-track" style={{ transform: `translateX(-${i * 100}%)` }}>
+            {slides.map((e, k) => (
+              <article
+                className="hero hero-slide"
+                style={bannerStyle(e.banner_color)}
+                key={e.id}
+                aria-roledescription="slide"
+                aria-label={`${k + 1} de ${n}: ${e.title}`}
+                aria-hidden={k !== i}
+              >
+                <div className="hero-slide-text">
+                  <div className="hero-slide-meta">
+                    <span className="pill">{rank(e) === 0 ? "ACONTECENDO AGORA" : "SEU PRÓXIMO DESAFIO"}</span>
+                    <strong>{dayRange(e.starts_at, e.ends_at)}</strong>
+                  </div>
+                  <h1>{e.title}</h1>
+                  <p>{e.summary}</p>
+                  <a className="button" href={href("/event/" + e.id)} tabIndex={k === i ? 0 : -1}>
+                    {rank(e) === 1 ? "Se inscrever" : "Ver hackathon"}
+                  </a>
+                </div>
+                <a className="hero-slide-cover" href={href("/event/" + e.id)} tabIndex={-1} aria-hidden="true">
+                  <img src={coverOf(e)} alt="" />
+                </a>
+              </article>
+            ))}
+          </div>
+        </div>
+        <button type="button" className="scroll-btn" aria-label="Próximo hackathon" disabled={n < 2} onClick={() => go(i + 1)}>
+          ›
+        </button>
+      </div>
+      {n > 1 && (
+        <div className="hero-dots" role="tablist" aria-label="Escolher hackathon">
+          {slides.map((e, k) => (
+            <button
+              key={e.id}
+              type="button"
+              role="tab"
+              aria-selected={k === i}
+              aria-label={e.title}
+              className={k === i ? "on" : ""}
+              onClick={() => setI(k)}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 function AreaPicker() {
@@ -1870,6 +2052,25 @@ function Card({ e, registration }: any) {
     <div className="card-body"><p className="event-organization">{e.organization}</p><h3>{e.title}</h3><p className="event-date">{date(e.starts_at)}</p><p className="event-address">{[e.city, e.venue].filter(Boolean).join(" — ")}</p><div className="tags"><span className="tag">{e.format}</span><span className="tag">{e.theme}</span></div></div>
   </a></article>;
 }
+// Card compacto dos hackathons de fora da hacko (topo na cor do banner, seta grande).
+function OutsideCard({ e }: { e: Row }) {
+  const open = windowState(e) === "open";
+  return (
+    <article className="outside-card" style={bannerStyle(e.banner_color)}>
+      <a href={href("/event/" + e.id)} aria-label={"Ver " + e.title}>
+        <div className="outside-card-top">
+          <span className={"event-block-status" + (open ? "" : " inactive")}>{open ? "Inscrições" : "Encerradas"}</span>
+          <Arrow size="40" />
+        </div>
+        <div className="outside-card-body">
+          <p className="event-organization">{e.organization}</p>
+          <h3>{e.title}</h3>
+          <p className="event-date">{date(e.starts_at)}</p>
+        </div>
+      </a>
+    </article>
+  );
+}
 function Teams({ items = [], row = false }: any) {
   const Wrap = row ? ScrollRow : ({ children }: { children: ReactNode }) => <div className="grid">{children}</div>;
   return items.length ? <Wrap>{items.map((t: Row) => {
@@ -2089,6 +2290,8 @@ export default function Hacko() {
     if (page === "home")
       return (
         <>
+          <HeroCarousel events={boot.events || []} />
+          {!(boot.events || []).some((e: Row) => e.ends_at > new Date().toISOString()) && (
           <section className="hero">
             <div>
               <span className="pill">MENOS IDEIAS NO PAPEL. MAIS NO MUNDO.</span>
@@ -2106,16 +2309,11 @@ export default function Hacko() {
             </div>
             <img src={photo(0)} alt="Pessoas colaborando em um evento de tecnologia" />
           </section>
-          <div className="section-head">
-            <div>
-              <span className="eyebrow">DESCUBRA. CONECTE. CONSTRUA.</span>
-              <h2>Hackathons para você</h2>
-            </div>
-            <a href="#/org" className="button secondary">
-              Organizar hackathon +
-            </a>
-          </div>
-          <div className="search catalog-filters">
+          )}
+          <h2 className="home-title">
+            Hackathons pra você <Arrow color="var(--blue)" />
+          </h2>
+          <div className="search catalog-filters home-filters">
             <label>
               O que você quer construir?
               <input
@@ -2162,32 +2360,58 @@ export default function Hacko() {
               />
             </label>
           </div>
-          <div className="grid">
-            {searchCatalog(boot.events, filters).map((e: Row) => (
-              <Card key={e.id} e={e} />
-            ))}
-            {!searchCatalog(boot.events, filters).length && (
-              <div className="empty">
-                <h3>A próxima oportunidade começa aqui.</h3>
-                <p>Nenhum hackathon publicado corresponde aos filtros.</p>
-                <a href="#/radar">Buscar oportunidades na web →</a>
-              </div>
-            )}
-          </div>
-          <div className="promos">
-            <section className="panel dark">
-              <span className="eyebrow">RADAR HACKO</span>
-              <h2>O próximo desafio pode estar perto.</h2>
-              <p>Descreva seus interesses e encontre oportunidades com fontes para conferir.</p>
+          {(() => {
+            const found = searchCatalog(boot.events, filters) as Row[];
+            const official = found.filter((e) => !e.external);
+            const outside = found.filter((e) => !!e.external);
+            return (
+              <>
+                {official.length > 0 && (
+                  <>
+                    <h3 className="home-sub">Oficiais da hacko</h3>
+                    <ScrollRow per={5}>
+                      {official.map((e) => (
+                        <Card key={e.id} e={e} />
+                      ))}
+                    </ScrollRow>
+                  </>
+                )}
+                {!found.length && (
+                  <div className="empty">
+                    <h3>A próxima oportunidade começa aqui.</h3>
+                    <p>Nenhum hackathon publicado corresponde aos filtros.</p>
+                    <a href="#/radar">Buscar oportunidades na web →</a>
+                  </div>
+                )}
+                {outside.length > 0 && (
+                  <section className="home-outside">
+                    <h3 className="home-sub">Fora da hacko - crie sua equipe por aqui!</h3>
+                    <ScrollRow per={5}>
+                      {outside.map((e) => (
+                        <OutsideCard key={e.id} e={e} />
+                      ))}
+                    </ScrollRow>
+                  </section>
+                )}
+              </>
+            );
+          })()}
+          <h2 className="home-title">
+            Comunidade <Arrow color="var(--blue)" />
+          </h2>
+          <div className="home-community">
+            <section className="home-card dark">
+              <h3>O seu próximo desafio pode estar por perto!</h3>
+              <p>Descreva seus interesses e encontre oportunidades com fontes para conferir!</p>
               <a className="button" href="#/radar">
-                Explorar com IA ↗
+                Explorar com IA <Arrow />
               </a>
             </section>
-            <section className="panel lime-panel">
-              <h2>Talento encontra talento.</h2>
-              <p>Complete seu perfil e mostre o que você quer construir.</p>
+            <section className="home-card lime">
+              <h3>Forme equipes e conheça novos parceiros pra hackathons!</h3>
+              <p>Complete seu perfil e mostre o que você pode construir!</p>
               <a className="button" href="#/community">
-                Conhecer a comunidade
+                Conhecer a comunidade <Arrow color="var(--blue)" />
               </a>
             </section>
           </div>
@@ -2513,6 +2737,15 @@ export default function Hacko() {
               <section className="panel">
                 <span className="pill">{status(e.status)}</span>
                 <h2>Seu desafio começa aqui</h2>
+                {!!e.external && e.source && (
+                  <p className="notice">
+                    Hackathon de fora da hacko: faça a inscrição oficial no{" "}
+                    <a href={e.source} target="_blank" rel="noopener noreferrer">
+                      site do organizador ↗
+                    </a>{" "}
+                    e use a hacko para formar sua equipe.
+                  </p>
+                )}
                 {account() || (
                   <>
                     {isCompany ? (
@@ -3322,14 +3555,14 @@ export default function Hacko() {
         )}
         <footer>
           <span>
-            <Logo arrow="var(--blue)" /> · Ideias grandes, conexões reais.
+            <Logo arrow="var(--blue)" /> O seu próximo <span className="blue-text">desafio</span> é aqui
           </span>
-          <a href="#/org">Para organizações</a>
           <span>
             <a href="/privacidade">Privacidade</a> · <a href="/termos">Termos de uso</a> · Fotos ilustrativas
             · Unsplash
           </span>
         </footer>
+        <div className="footer-arrows" aria-hidden="true" />
       </main>
       <nav className="bottom" aria-label="Atalhos mobile">
         <a href="#/">Explorar</a>
@@ -3391,6 +3624,7 @@ function EventForm({ event = {}, save, busy }: any) {
           v[k] = new Date(v[k]).toISOString();
         v.submission_deadline = v.submission_deadline ? new Date(v.submission_deadline).toISOString() : "";
         for (const k of ["capacity", "team_min", "team_max", "image"]) v[k] = Number(v[k]);
+        v.external = v.external === "on" ? 1 : 0;
         save(v, cover.current);
       }}
     >
@@ -3407,6 +3641,11 @@ function EventForm({ event = {}, save, busy }: any) {
         <Field name="venue" label="Local ou plataforma" value={event.venue} required />
         <Field name="source" label="Site oficial (opcional)" type="url" value={event.source} />
       </div>
+      <label className="check">
+        <input type="checkbox" name="external" defaultChecked={!!event.external} />
+        Hackathon de fora da hacko: a inscrição oficial é no site do organizador e aqui os participantes só
+        formam equipes (exige o site oficial).
+      </label>
       <ImageInput
         label="Capa do hackathon"
         help="JPG, PNG ou WebP. Recortada em 1600×640 (proporção 5:2). Sem capa, usamos a imagem ilustrativa escolhida abaixo."
@@ -3471,6 +3710,7 @@ function EventForm({ event = {}, save, busy }: any) {
           </select>
         </label>
       </div>
+      <BannerColorPicker value={event.banner_color} title={event.title} />
       <p className="notice">
         Novos eventos são salvos como rascunho. A publicação é uma ação separada no painel. Datas seguem o
         fuso horário do seu navegador.

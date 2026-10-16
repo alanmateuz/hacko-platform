@@ -1,0 +1,1 @@
+ALTER TABLE `events` ADD `external` integer DEFAULT 0 NOT NULL;

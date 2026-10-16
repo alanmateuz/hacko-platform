@@ -58,6 +58,10 @@ export const events = sqliteTable("events", {
   teamMin: integer("team_min").notNull(),
   teamMax: integer("team_max").notNull(),
   image: integer("image").notNull().default(0),
+  // Cor do banner na página inicial (paleta fixa, ver BANNER_COLORS).
+  bannerColor: text("banner_color").notNull().default("blue"),
+  // 1 = hackathon de fora da hacko (inscrição oficial no site do organizador; aqui só a formação de equipes).
+  external: integer("external").notNull().default(0),
   source: text("source").notNull().default(""),
   status: text("status").notNull().default("draft"),
   createdAt: text("created_at").notNull(),
