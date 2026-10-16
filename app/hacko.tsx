@@ -197,34 +197,43 @@ function Form({ children, onSubmit, label = "Salvar", busy }: any) {
     </form>
   );
 }
+const SOCIAL_LABELS: Record<string, string> = { linkedin: "LinkedIn", github: "GitHub", portfolio: "Portfólio", instagram: "Instagram" };
+function SocialIcon({ kind }: { kind: string }) {
+  if (kind === "linkedin") return <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5.3 3a2.3 2.3 0 1 0 0 4.6 2.3 2.3 0 0 0 0-4.6M3.4 9h3.8v12H3.4zm6.1 0h3.6v1.6c.6-1.1 1.8-2 3.6-2 3.8 0 4.3 2.5 4.3 5.7V21h-3.8v-6c0-1.4 0-3-1.8-3s-2.1 1.4-2.1 2.9V21H9.5z"/></svg>;
+  if (kind === "github") return <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.86c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.89 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.26-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03a9.6 9.6 0 0 1 5 0c1.91-1.3 2.75-1.03 2.75-1.03.55 1.38.2 2.39.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.76c0 .26.18.58.69.48A10 10 0 0 0 12 2"/></svg>;
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">{kind === "instagram" ? <><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></> : <><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18M5 6h14M5 18h14"/></>}</svg>;
+}
 function Person({ p }: any) {
-  return (
-    <article className="panel">
-      <div className="person">
-        <Avatar p={p} />
-        <div>
-          <h3>{p.name}</h3>
-          <small>
-            {p.city} {p.availability && "· " + p.availability}
-          </small>
-        </div>
-      </div>
-      <p>{p.bio}</p>
+  return <article className={"profile-block theme-" + (p.card_theme === "lime" ? "lime" : "blue")}>
+    <div className="profile-block-head">
+      <span className="profile-motif" aria-hidden="true"><Arrow size="22" /></span>
+      {p.area && <span className="profile-area">{p.area}</span>}
+      <Avatar p={p} />
+      <div className="profile-identity"><h3>{p.name || "Seu nome"}</h3><small>{p.city || "Sua cidade"}</small></div>
+    </div>
+    <div className="profile-block-body">
+      <div className="profile-affiliations">{p.school && <p>{p.school}</p>}{p.workplace && <p>{p.workplace}</p>}</div>
+      <p className="profile-bio">{p.bio || "Conte um pouco sobre você."}</p>
       <div className="tags">{tags(p.skills)}</div>
-      <div className="actions">
-        {p.linkedin && (
-          <a href={p.linkedin} target="_blank" rel="noreferrer">
-            LinkedIn ↗
-          </a>
-        )}
-        {p.github && (
-          <a href={p.github} target="_blank" rel="noreferrer">
-            GitHub ↗
-          </a>
-        )}
-      </div>
-    </article>
-  );
+      <div className="profile-socials">{Object.keys(SOCIAL_LABELS).filter(k => p[k]).slice(0, 2).map(k => <a key={k} className={"social-icon social-" + k} href={p[k]} target="_blank" rel="noopener noreferrer" aria-label={SOCIAL_LABELS[k] + " de " + (p.name || "usuário") + " (abre em nova aba)"} title={SOCIAL_LABELS[k]}><SocialIcon kind={k} /></a>)}</div>
+    </div>
+  </article>;
+}
+function ThemePicker({ value = "blue", team = false, onChange }: any) {
+  const [theme, setTheme] = useState(value);
+  return <fieldset className="theme-picker"><legend>Tema {team ? "da equipe" : "do perfil"}</legend><div className="theme-options">{["blue", "lime"].map(v => <label key={v} className={"theme-option" + (theme === v ? " selected" : "")}><input type="radio" name="card_theme" value={v} checked={theme === v} onChange={() => { setTheme(v); onChange?.(v); }} /><span className={"theme-swatch swatch-" + v + (team ? " swatch-team" : "")} aria-hidden="true"/>{v === "blue" ? "Azul + branco" : team ? "Branco + verde" : "Preto + verde"}</label>)}</div><small>Esta escolha aparece para as outras pessoas.</small></fieldset>;
+}
+function ProfileAppearance({ p }: any) {
+  const [draft, setDraft] = useState(p);
+  const [selected, setSelected] = useState<string[]>(Object.keys(SOCIAL_LABELS).filter(k => p[k]).slice(0, 2));
+  return <div className="profile-customization">
+    <ThemePicker value={p.card_theme} onChange={(card_theme: string) => setDraft({ ...draft, card_theme })}/>
+    <label>Área<select name="area" defaultValue={p.area || ""} onChange={e => setDraft({ ...draft, area: e.target.value })}><option value="">Escolha sua área</option>{["DEV", "NEGÓCIOS", "DESIGN", "MARKETING"].map(v => <option key={v}>{v}</option>)}</select></label>
+    <label>Faculdade (opcional)<input name="school" maxLength={160} defaultValue={p.school || ""} onChange={e => setDraft({ ...draft, school: e.target.value })}/></label>
+    <label>Trabalho (opcional)<input name="workplace" maxLength={160} defaultValue={p.workplace || ""} onChange={e => setDraft({ ...draft, workplace: e.target.value })}/></label>
+    <fieldset className="social-picker"><legend>Redes sociais · {selected.length}/2</legend><p>Escolha até duas redes para exibir no cartão.</p>{Object.entries(SOCIAL_LABELS).map(([k, label]) => <div key={k}><label className="check"><input type="checkbox" checked={selected.includes(k)} disabled={!selected.includes(k) && selected.length === 2} onChange={e => { const next = e.target.checked ? [...selected, k] : selected.filter(v => v !== k); setSelected(next); }}/>{label}</label>{selected.includes(k) ? <label className="social-url"><span className="sr-only">URL do {label}</span><input type="url" name={k} placeholder="https://" required maxLength={500} value={draft[k] || ""} onChange={e => setDraft({ ...draft, [k]: e.target.value })}/></label> : <input type="hidden" name={k} value=""/>}</div>)}</fieldset>
+    <div className="profile-preview"><small>Prévia do seu cartão</small><Person p={{ ...draft, ...Object.fromEntries(Object.keys(SOCIAL_LABELS).filter(k => !selected.includes(k)).map(k => [k, ""])) }}/></div>
+  </div>;
 }
 function windowState(e: Row) {
   const t = new Date().toISOString();
@@ -1724,61 +1733,22 @@ function TeamDelivery({
     </section>
   );
 }
-function Card({ e }: any) {
-  const closed = e.closes_at <= new Date().toISOString();
-  return (
-    <article className="card">
-      <a href={href("/event/" + e.id)}>
-        <img src={coverOf(e)} alt={"Capa de " + e.title} loading="lazy" />
-        <div className="card-body">
-          <div className="eyebrow">
-            {e.organization} · {e.format}
-          </div>
-          <h3>{e.title}</h3>
-          <p className="meta">
-            {date(e.starts_at)}
-            <br />
-            {e.city} · {e.venue}
-          </p>
-          <div className="tags">
-            <span className="tag">{e.theme}</span>
-            <span className={"tag " + (!closed ? "lime" : "")}>
-              {closed
-                ? "Inscrições encerradas"
-                : e.opens_at > new Date().toISOString()
-                  ? "Em breve"
-                  : "Inscrições abertas"}
-            </span>
-          </div>
-          <p className="meta">
-            {e.participants || 0} participantes · {e.capacity} vagas
-          </p>
-        </div>
-      </a>
-    </article>
-  );
+function Card({ e, registration }: any) {
+  const state = windowState({ ...e, status: e.event_status || e.status });
+  const label = registration ? (registration === "active" ? "Confirmado" : "Cancelado") : ({ open: "Inscrições", closed: "Inscrições encerradas", soon: "Em breve", full: "Vagas esgotadas", draft: "Indisponível" }[state]);
+  return <article className="card event-block"><a href={href("/event/" + e.id)}>
+    <div className="event-block-cover"><img src={coverOf(e)} alt={"Capa de " + e.title} loading="lazy"/><span className={"event-block-status" + (registration === "cancelled" || (!registration && state !== "open") ? " inactive" : "")}>{label}</span></div>
+    <div className="card-body"><p className="event-organization">{e.organization}</p><h3>{e.title}</h3><p className="event-date">{date(e.starts_at)}</p><p className="event-address">{[e.city, e.venue].filter(Boolean).join(" — ")}</p><div className="tags"><span className="tag">{e.format}</span><span className="tag">{e.theme}</span></div></div>
+  </a></article>;
 }
 function Teams({ items = [] }: any) {
-  return items.length ? (
-    <div className="grid">
-      {items.map((t: Row) => (
-        <article className="panel" key={t.id}>
-          <span className="eyebrow">{t.event_title}</span>
-          <h3>{t.name}</h3>
-          <p>{t.description}</p>
-          <p className="meta">
-            {status(t.status)} {t.members !== undefined && `· ${t.members}/${t.team_max} integrantes`}
-          </p>
-          <div className="tags">{tags(t.skills)}</div>
-          <a className="button secondary" href={href("/team/" + t.id)}>
-            Ver equipe →
-          </a>
-        </article>
-      ))}
-    </div>
-  ) : (
-    <div className="empty">Nenhuma equipe encontrada.</div>
-  );
+  return items.length ? <div className="grid">{items.map((t: Row) => {
+    const complete = t.status === "confirmed" || (t.members != null && t.team_max != null && t.members >= t.team_max);
+    return <article className={"team-block theme-" + (t.card_theme === "lime" ? "lime" : "blue")} key={t.id}><a href={href("/team/" + t.id)} aria-label={"Ver equipe " + t.name}>
+      <div className="team-block-head"><span>{t.event_title}</span><Arrow size="25"/></div>
+      <div className="team-block-body"><div className="team-block-status"><span className="tag">{status(t.status)}</span>{t.members != null && <span className="team-count" aria-label={t.members + " de " + t.team_max + " integrantes"}>{t.members}/{t.team_max}</span>}</div><div className="team-block-description"><h3>{t.name}</h3><p>{t.description}</p></div><div className="team-block-needs">{complete ? <strong>Equipe completa!</strong> : <><span>Procuramos:</span><div className="tags">{t.skills ? tags(t.skills) : <span className="tag">Novos integrantes</span>}</div></>}</div></div>
+    </a></article>;
+  })}</div> : <div className="empty">Nenhuma equipe encontrada.</div>;
 }
 const blankProfile = {
   name: "",
@@ -1790,6 +1760,7 @@ const blankProfile = {
   linkedin: "",
   github: "",
   visible: 0,
+  card_theme: "blue", area: "", school: "", workplace: "", portfolio: "", instagram: "",
 };
 export default function Hacko() {
   const [route, setRoute] = useState("/"),
@@ -2286,8 +2257,7 @@ export default function Hacko() {
                     value={p.availability}
                     options={["", "Integral", "Noites", "Finais de semana"]}
                   />
-                  <Field name="linkedin" label="LinkedIn (opcional)" type="url" value={p.linkedin} />
-                  <Field name="github" label="GitHub ou portfólio (opcional)" type="url" value={p.github} />
+                  <ProfileAppearance key={JSON.stringify(p)} p={p} />
                   <label className="check">
                     <input type="checkbox" name="visible" defaultChecked={!!p.visible} />
                     Exibir meu nome, bio, stack e links na comunidade e nos eventos em que me inscrevi.
@@ -2625,11 +2595,7 @@ export default function Hacko() {
           {account()}
           <div className="grid">
             {boot.registrations.map((r: Row) => (
-              <article className="panel" key={r.event_id}>
-                <span className="pill">{status(r.status)}</span>
-                <h3>{r.title}</h3>
-                <a href={href("/event/" + r.event_id)}>Abrir evento →</a>
-              </article>
+              <Card key={r.event_id} e={r} registration={r.registration_status} />
             ))}
           </div>
           {!boot.registrations.length && (
@@ -2695,6 +2661,7 @@ export default function Hacko() {
                 <Field name="name" label="Nome da equipe" required />
                 <Field name="description" label="O que vocês querem construir?" type="textarea" />
                 <Field name="skills" label="Competências que procuram" />
+                <ThemePicker team />
                 <small>Apenas uma equipe por participante em cada evento.</small>
               </Form>
             ))}
