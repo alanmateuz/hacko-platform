@@ -342,6 +342,169 @@ function BannerColorPicker({ value = "blue", title }: { value?: string; title?: 
     </fieldset>
   );
 }
+// Ganhadores: um hackathon por vez, na cor do banner, com o pódio em cartões dourado/prata/bronze.
+function WinnersCarousel({ winners }: { winners: Row[] }) {
+  const [i, setI] = useState(0);
+  const n = winners.length;
+  const go = (v: number) => setI((v + n) % n);
+  const e = winners[Math.min(i, n - 1)];
+  const medal = ["", "gold", "silver", "bronze"];
+  return (
+    <div className="winners">
+      <div className="hero-carousel-row">
+        <button type="button" className="scroll-btn" aria-label="Hackathon anterior" disabled={n < 2} onClick={() => go(i - 1)}>
+          ‹
+        </button>
+        <article className="winners-slide" style={bannerStyle(e.banner_color)} key={e.id}>
+          {/* Seta da marca atravessando o bloco inteiro, na cor do banner */}
+          <svg className="winners-deco" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 21 19.5 4.5M7.5 3.5h13v13" />
+          </svg>
+          <a className="winners-link" href={href("/event/" + e.id)} aria-label={"Ver " + e.title}>
+            <Arrow size="48" />
+          </a>
+          <span className="winners-kicker">RESULTADO</span>
+          <h3>{e.title}</h3>
+          <p>{e.summary}</p>
+          {e.places.map((pl: Row) => (
+            <div className="winners-place" key={pl.place}>
+              <h4>
+                {pl.place} LUGAR - {pl.team_name}
+              </h4>
+              {pl.members.length ? (
+                <ScrollRow per={3}>
+                  {pl.members.map((p: Row) => (
+                    <Person key={p.id} p={{ ...p, podium: 1 }} theme={medal[pl.place]} inEvent />
+                  ))}
+                </ScrollRow>
+              ) : (
+                <p className="winners-empty">Os integrantes desta equipe preferiram não exibir o perfil.</p>
+              )}
+            </div>
+          ))}
+        </article>
+        <button type="button" className="scroll-btn" aria-label="Próximo hackathon" disabled={n < 2} onClick={() => go(i + 1)}>
+          ›
+        </button>
+      </div>
+      {n > 1 && (
+        <div className="hero-dots" role="tablist" aria-label="Escolher hackathon">
+          {winners.map((w, k) => (
+            <button key={w.id} type="button" role="tab" aria-selected={k === i} aria-label={w.title} className={k === i ? "on" : ""} onClick={() => setI(k)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+// Comunidade: destaque, filtros, ganhadores, pessoas e equipes.
+function CommunityPage({ data }: { data: Row }) {
+  const [f, setF] = useState({ city: "", q: "", hack: "" });
+  const [personArea, setPersonArea] = useState("");
+  const [teamArea, setTeamArea] = useState("");
+  const has = (text: string, q: string) => !q || normalize(text || "").includes(normalize(q));
+  const people = (data.participants || []).filter(
+    (p: Row) =>
+      has(p.city, f.city) &&
+      has([p.name, p.skills, p.bio, p.area, p.school, p.workplace].join(" "), f.q) &&
+      has(p.hackathons, f.hack) &&
+      (!personArea || p.area === personArea),
+  );
+  const teams = (data.teams || []).filter(
+    (t: Row) =>
+      has([t.name, t.skills, t.description, t.areas].join(" "), f.q) &&
+      has(t.event_title, f.hack) &&
+      has(t.event_city, f.city) &&
+      (!teamArea || teamAreas(t).includes(teamArea)),
+  );
+  return (
+    <div className="community-page">
+      <section className="comm-hero">
+        <h1>Conheça a maior comunidade de hackathons do Brasil!</h1>
+      </section>
+      <div className="comm-arrows" aria-hidden="true" />
+      <section className="comm-dark">
+        <div className="comm-filters">
+          <label>
+            Cidade
+            <input placeholder="Qualquer cidade" value={f.city} onChange={(e) => setF({ ...f, city: e.target.value })} />
+          </label>
+          <label>
+            Buscar
+            <input placeholder="Pessoas, equipes ou stack" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} />
+          </label>
+          <label>
+            Hackathons
+            <input placeholder="Nome" value={f.hack} onChange={(e) => setF({ ...f, hack: e.target.value })} />
+          </label>
+        </div>
+        {!!data.winners?.length && (
+          <>
+            <h2>Conheça os ganhadores!</h2>
+            <WinnersCarousel winners={data.winners} />
+          </>
+        )}
+        <h2>Conheça seus próximos hackers!</h2>
+        <AreaFilter value={personArea} onChange={setPersonArea} />
+        {people.length ? (
+          <ScrollRow per={3}>
+            {people.map((p: Row) => (
+              <Person key={p.id} p={p} />
+            ))}
+          </ScrollRow>
+        ) : (
+          <p className="comm-empty">
+            {data.participants?.length
+              ? "Ninguém encontrado com esses filtros."
+              : "A comunidade está começando. Ative a visibilidade do seu perfil para aparecer aqui."}
+          </p>
+        )}
+        <h2>Conheça sua próxima equipe vencedora!</h2>
+        <AreaFilter value={teamArea} onChange={setTeamArea} />
+        {teams.length ? <Teams row per={4} items={teams} /> : <p className="comm-empty">Nenhuma equipe encontrada.</p>}
+      </section>
+    </div>
+  );
+}
+// Resultado do hackathon (painel da empresa): escolhe as equipes em 1º, 2º e 3º lugar.
+function ResultsPanel({ teams, placements, busy, onSave }: { teams: Row[]; placements: Row[]; busy: boolean; onSave: (p: string[]) => void }) {
+  const initial = [1, 2, 3].map((n) => placements.find((p) => p.place === n)?.team_id || "");
+  const [places, setPlaces] = useState<string[]>(initial);
+  const medals = ["🥇 1º lugar", "🥈 2º lugar", "🥉 3º lugar (opcional)"];
+  return (
+    <section className="panel results-panel">
+      <h2>Resultado do hackathon 🏆</h2>
+      <p>
+        As equipes do pódio aparecem em "Conheça os ganhadores" na comunidade e os integrantes ganham o cartão
+        dourado, prata ou bronze no perfil por 7 dias.
+      </p>
+      <div className="results-grid">
+        {medals.map((label, i) => (
+          <label key={label}>
+            {label}
+            <select
+              value={places[i]}
+              onChange={(e) => setPlaces(places.map((v, k) => (k === i ? e.target.value : v)))}
+            >
+              <option value="">Escolha a equipe</option>
+              {teams.map((t) => (
+                <option key={t.id} value={t.id} disabled={places.includes(t.id) && places[i] !== t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+      </div>
+      <button type="button" disabled={busy || !places[0] || !places[1]} onClick={() => onSave(places)}>
+        {placements.length ? "Atualizar resultado" : "Publicar resultado"}
+      </button>
+      {!!placements.length && (
+        <small>Publicado em {new Date(placements[0].created_at).toLocaleString("pt-BR")}.</small>
+      )}
+    </section>
+  );
+}
 // Banner rotativo da página inicial: um hackathon por vez, priorizando os que estão acontecendo.
 function HeroCarousel({ events }: { events: Row[] }) {
   const now = new Date().toISOString();
@@ -456,8 +619,10 @@ function AreaPicker() {
   );
 }
 // inEvent: bloco dentro do hackathon (sem a seta do canto, como no Canva).
-function Person({ p, onInvite, inEvent }: { p: Row; onInvite?: () => void; inEvent?: boolean }) {
-  return <article className={"profile-block theme-" + (p.card_theme === "lime" ? "lime" : "blue")}>
+// theme: força um tema (ex.: dourado/prata nos ganhadores).
+function Person({ p, onInvite, inEvent, theme }: { p: Row; onInvite?: () => void; inEvent?: boolean; theme?: string }) {
+  const t = theme || (["lime", "gold", "silver", "bronze"].includes(p.card_theme) ? p.card_theme : "blue");
+  return <article className={"profile-block theme-" + t}>
     <div className="profile-block-head">
       {!inEvent && <span className="profile-motif" aria-hidden="true"><Arrow size="22" /></span>}
       {onInvite ? (
@@ -478,15 +643,44 @@ function Person({ p, onInvite, inEvent }: { p: Row; onInvite?: () => void; inEve
     </div>
   </article>;
 }
-function ThemePicker({ value = "blue", team = false, onChange }: any) {
-  const [theme, setTheme] = useState(value);
-  return <fieldset className="theme-picker"><legend>Tema {team ? "da equipe" : "do perfil"}</legend><div className="theme-options">{["blue", "lime"].map(v => <label key={v} className={"theme-option" + (theme === v ? " selected" : "")}><input type="radio" name="card_theme" value={v} checked={theme === v} onChange={() => { setTheme(v); onChange?.(v); }} /><span className={"theme-swatch swatch-" + v + (team ? " swatch-team" : "")} aria-hidden="true"/>{v === "blue" ? "Azul + branco" : team ? "Branco + verde" : "Preto + verde"}</label>)}</div><small>Esta escolha aparece para as outras pessoas.</small></fieldset>;
+const PODIUM_THEMES: Record<number, [string, string]> = { 1: ["gold", "Dourado"], 2: ["silver", "Prata"], 3: ["bronze", "Bronze"] };
+// Temas do cartão. O do pódio só aparece para quem ficou em 1º, 2º ou 3º lugar nos últimos 7 dias.
+function ThemePicker({ value = "blue", team = false, podium, onChange }: any) {
+  const podiumTheme = !team && podium ? PODIUM_THEMES[podium.place] : null;
+  const options: [string, string][] = [
+    ["blue", "Azul + branco"],
+    ["lime", team ? "Branco + verde" : "Preto + verde"],
+    ...(podiumTheme ? [podiumTheme] : []),
+  ];
+  const [theme, setTheme] = useState(options.some(([v]) => v === value) ? value : "blue");
+  const until = podium && new Date(new Date(podium.created_at).getTime() + 7 * 864e5).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  return (
+    <fieldset className="theme-picker">
+      <legend>Tema {team ? "da equipe" : "do perfil"}</legend>
+      <div className="theme-options">
+        {options.map(([v, label]) => (
+          <label key={v} className={"theme-option" + (theme === v ? " selected" : "")}>
+            <input type="radio" name="card_theme" value={v} checked={theme === v} onChange={() => { setTheme(v); onChange?.(v); }} />
+            <span className={"theme-swatch swatch-" + v + (team ? " swatch-team" : "")} aria-hidden="true" />
+            {label}
+          </label>
+        ))}
+      </div>
+      {podiumTheme ? (
+        <small className="podium-note">
+          {podium.place}º lugar no {podium.event_title}! O cartão {podiumTheme[1].toLowerCase()} fica disponível até {until}.
+        </small>
+      ) : (
+        <small>Esta escolha aparece para as outras pessoas.</small>
+      )}
+    </fieldset>
+  );
 }
-function ProfileAppearance({ p }: any) {
+function ProfileAppearance({ p, podium }: any) {
   const [draft, setDraft] = useState(p);
   const [selected, setSelected] = useState<string[]>(Object.keys(SOCIAL_LABELS).filter(k => p[k]).slice(0, 2));
   return <div className="profile-customization">
-    <ThemePicker value={p.card_theme} onChange={(card_theme: string) => setDraft({ ...draft, card_theme })}/>
+    <ThemePicker value={p.card_theme} podium={podium} onChange={(card_theme: string) => setDraft({ ...draft, card_theme })}/>
     <label>Área<select name="area" defaultValue={p.area || ""} onChange={e => setDraft({ ...draft, area: e.target.value })}><option value="">Escolha sua área</option>{["DEV", "NEGÓCIOS", "DESIGN", "MARKETING"].map(v => <option key={v}>{v}</option>)}</select></label>
     <label>Faculdade (opcional)<input name="school" maxLength={160} defaultValue={p.school || ""} onChange={e => setDraft({ ...draft, school: e.target.value })}/></label>
     <label>Trabalho (opcional)<input name="workplace" maxLength={160} defaultValue={p.workplace || ""} onChange={e => setDraft({ ...draft, workplace: e.target.value })}/></label>
@@ -2046,9 +2240,12 @@ function TeamDelivery({
 }
 function Card({ e, registration }: any) {
   const state = windowState({ ...e, status: e.event_status || e.status });
-  const label = registration ? (registration === "active" ? "Confirmado" : "Cancelado") : ({ open: "Inscrições", closed: "Inscrições encerradas", soon: "Em breve", full: "Vagas esgotadas", draft: "Indisponível" }[state]);
-  return <article className="card event-block"><a href={href("/event/" + e.id)}>
-    <div className="event-block-cover"><img src={coverOf(e)} alt={"Capa de " + e.title} loading="lazy"/><span className={"event-block-status" + (registration === "cancelled" || (!registration && state !== "open") ? " inactive" : "")}>{label}</span></div>
+  // Meus hackathons: Encerrado (evento acabou), Pendente (de fora da hacko: confirmar no site do organizador), Confirmado.
+  const ended = !!registration && e.ends_at <= new Date().toISOString();
+  const mine = registration === "active" ? (ended ? "ended" : e.external ? "pending" : "confirmed") : registration ? "cancelled" : "";
+  const label = registration ? ({ ended: "Encerrado", pending: "Pendente", confirmed: "Confirmado", cancelled: "Cancelado" } as Record<string, string>)[mine] : ({ open: "Inscrições", closed: "Inscrições encerradas", soon: "Em breve", full: "Vagas esgotadas", draft: "Indisponível" }[state]);
+  return <article className={"card event-block" + (mine === "ended" || mine === "cancelled" ? " is-ended" : "")}><a href={href("/event/" + e.id)}>
+    <div className="event-block-cover"><img src={coverOf(e)} alt={"Capa de " + e.title} loading="lazy"/><span className={"event-block-status" + (mine ? " mine-" + mine : !registration && state !== "open" ? " inactive" : "")}>{label}</span></div>
     <div className="card-body"><p className="event-organization">{e.organization}</p><h3>{e.title}</h3><p className="event-date">{date(e.starts_at)}</p><p className="event-address">{[e.city, e.venue].filter(Boolean).join(" — ")}</p><div className="tags"><span className="tag">{e.format}</span><span className="tag">{e.theme}</span></div></div>
   </a></article>;
 }
@@ -2071,15 +2268,16 @@ function OutsideCard({ e }: { e: Row }) {
     </article>
   );
 }
-function Teams({ items = [], row = false }: any) {
-  const Wrap = row ? ScrollRow : ({ children }: { children: ReactNode }) => <div className="grid">{children}</div>;
-  return items.length ? <Wrap>{items.map((t: Row) => {
+function Teams({ items = [], row = false, per = 3 }: any) {
+  if (!items.length) return <div className="empty">Nenhuma equipe encontrada.</div>;
+  const blocks = items.map((t: Row) => {
     const complete = t.status === "confirmed" || (t.members != null && t.team_max != null && t.members >= t.team_max);
     return <article className={"team-block theme-" + (t.card_theme === "lime" ? "lime" : "blue")} key={t.id}><a href={href("/team/" + t.id)} aria-label={"Ver equipe " + t.name}>
       <div className="team-block-head"><span>{t.event_title}</span><Arrow size="25"/></div>
       <div className="team-block-body"><div className="team-block-status"><span className="tag">{status(t.status)}</span>{t.members != null && <span className="team-count" aria-label={t.members + " de " + t.team_max + " integrantes"}>{t.members}/{t.team_max}</span>}</div><div className="team-block-description"><h3>{t.name}</h3>{t.description?.trim() && <p>{t.description}</p>}</div><div className="team-block-needs">{complete ? <strong>Equipe completa!</strong> : <><span>Procuramos:</span><div className="tags">{teamAreas(t).length ? teamAreas(t).map((a) => <span className="tag" key={a}>{a}</span>) : t.skills ? tags(t.skills) : <span className="tag">Novos integrantes</span>}</div></>}</div></div>
     </a></article>;
-  })}</Wrap> : <div className="empty">Nenhuma equipe encontrada.</div>;
+  });
+  return row ? <ScrollRow per={per}>{blocks}</ScrollRow> : <div className="grid">{blocks}</div>;
 }
 const blankProfile = {
   name: "",
@@ -2613,7 +2811,7 @@ export default function Hacko() {
                     value={p.availability}
                     options={["", "Integral", "Noites", "Finais de semana"]}
                   />
-                  <ProfileAppearance key={JSON.stringify(p)} p={p} />
+                  <ProfileAppearance key={JSON.stringify(p)} p={p} podium={boot.podium} />
                   <label className="check">
                     <input type="checkbox" name="visible" defaultChecked={!!p.visible} />
                     Exibir meu nome, bio, stack e links na comunidade e nos eventos em que me inscrevi.
@@ -2948,85 +3146,88 @@ export default function Hacko() {
       );
     if (page === "community")
       return (
-        <>
-          <span className="eyebrow">GENTE QUE CONSTRÓI JUNTO</span>
-          <h1>Sua próxima conexão.</h1>
-          <p>Descubra participantes que escolheram compartilhar seus perfis.</p>
-          <div className="actions">
-            <a className="button" href="#/teams">
-              Buscar grupos e equipes
-            </a>
-            <a className="button secondary" href="#/profile">
-              Meu perfil
-            </a>
-          </div>
-          <label className="search-label">
-            Nome, cidade ou stack
-            <input
-              placeholder="O que você procura?"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </label>
-          <div className="grid">
-            {(data.participants || [])
-              .filter((p: Row) =>
-                normalize(p.name + " " + p.skills + " " + p.city).includes(normalize(query)),
-              )
-              .map((p: Row) => (
-                <Person key={p.id} p={p} />
-              ))}
-            {!data.participants?.length && (
-              <div className="empty">
-                A comunidade está começando. Ative a visibilidade do seu perfil para aparecer aqui.
-              </div>
-            )}
-          </div>
-        </>
+        <CommunityPage data={data} />
       );
     if (page === "mine")
       return (
-        <>
-          <span className="eyebrow">SUA JORNADA</span>
-          <h1>Meus hackathons</h1>
-          {account()}
-          <div className="grid">
-            {boot.registrations.map((r: Row) => (
-              <Card key={r.event_id} e={r} registration={r.registration_status} />
-            ))}
-          </div>
-          {!boot.registrations.length && (
-            <div className="empty">
-              Suas inscrições aparecerão aqui. <a href="#/">Explorar eventos →</a>
-            </div>
-          )}
-          <div className="section-head">
-            <h2>Minhas equipes</h2>
-          </div>
-          <Teams items={data.teams} />
-          <div className="section-head">
-            <h2>Convites recebidos</h2>
-          </div>
-          {data.invites?.map((r: Row) => (
-            <section className="panel" key={r.id}>
-              <h3>{r.name}</h3>
-              <div className="actions">
-                {button("Aceitar", { op: "team.respond", id: r.team_id, requestId: r.id, accept: true })}
-                {button("Recusar", { op: "team.respond", id: r.team_id, requestId: r.id, accept: false })}
+        <div className="mine-page">
+          <h1 className="mine-title">
+            Meus Hackathons <Arrow color="var(--blue)" />
+          </h1>
+          {account() || (
+            <>
+              {boot.registrations.length ? (
+                <ScrollRow per={4}>
+                  {[...boot.registrations]
+                    // Ativos primeiro (pela data), encerrados e cancelados no fim.
+                    .sort(
+                      (a: Row, b: Row) =>
+                        Number(a.ends_at <= new Date().toISOString() || a.registration_status !== "active") -
+                          Number(b.ends_at <= new Date().toISOString() || b.registration_status !== "active") ||
+                        a.starts_at.localeCompare(b.starts_at),
+                    )
+                    .map((r: Row) => (
+                      <Card key={r.event_id} e={r} registration={r.registration_status} />
+                    ))}
+                </ScrollRow>
+              ) : (
+                <div className="empty">
+                  Suas inscrições aparecerão aqui. <a href="#/">Explorar eventos →</a>
+                </div>
+              )}
+              <div className="mine-grid">
+                <section className="mine-teams">
+                  <h2>
+                    Minhas equipes <Arrow color="var(--blue)" />
+                  </h2>
+                  {data.teams?.length ? (
+                    <Teams row per={2} items={data.teams} />
+                  ) : (
+                    <p className="mine-empty">
+                      Você ainda não está em uma equipe. <a href="#/teams">Encontrar equipe →</a>
+                    </p>
+                  )}
+                </section>
+                <section className="mine-invites">
+                  <h2>
+                    Convites recebidos <Arrow color="var(--blue)" />
+                  </h2>
+                  {data.invites?.length ? (
+                    data.invites.map((r: Row) => (
+                      <div className="mine-invite" key={r.id}>
+                        <b>{r.name}</b>
+                        <div className="actions">
+                          {button("Aceitar", { op: "team.respond", id: r.team_id, requestId: r.id, accept: true })}
+                          {button("Recusar", { op: "team.respond", id: r.team_id, requestId: r.id, accept: false })}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="mine-empty">Nenhum convite recebido.</p>
+                  )}
+                </section>
               </div>
-            </section>
-          ))}
-          <div className="section-head">
-            <h2>Salvos</h2>
-          </div>
-          <div className="grid">
-            {boot.events
-              .filter((e: Row) => boot.favorites.some((f: Row) => f.event_id === e.id))
-              .map((e: Row) => (
-                <Card key={e.id} e={e} />
-              ))}
-          </div>
-        </>
+              <section className="mine-saved">
+                <h2>
+                  Salvos <span aria-hidden="true">♥</span>
+                </h2>
+                {boot.events.some((e: Row) => boot.favorites.some((f: Row) => f.event_id === e.id)) ? (
+                  <ScrollRow per={4}>
+                    {boot.events
+                      .filter((e: Row) => boot.favorites.some((f: Row) => f.event_id === e.id))
+                      .map((e: Row) => (
+                        <Card key={e.id} e={e} />
+                      ))}
+                  </ScrollRow>
+                ) : (
+                  <p className="mine-empty">
+                    Toque em "Salvar evento" na página de um hackathon para guardá-lo aqui.
+                  </p>
+                )}
+              </section>
+            </>
+          )}
+        </div>
       );
     if (page === "create")
       return (
@@ -3337,6 +3538,17 @@ export default function Hacko() {
                 "Arquivar o evento e encerrar novas inscrições?",
               )}
           </div>
+          {e.status === "published" && e.starts_at <= new Date().toISOString() && (
+            <ResultsPanel
+              teams={data.teams || []}
+              placements={data.placements || []}
+              busy={busy}
+              onSave={async (places: string[]) => {
+                if (await askConfirm("Publicar o resultado? As equipes do pódio serão notificadas."))
+                  mutate({ op: "event.results", id, places });
+              }}
+            />
+          )}
           <EventDashboard
             data={data}
             busy={busy}
