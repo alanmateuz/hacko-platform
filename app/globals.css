@@ -1737,8 +1737,9 @@ button.danger:disabled {
 .team-count { font-size: 17px; font-weight: 700; }
 .team-block .tag { background: var(--block-soft); color: #0057d9; font-size: 11px; }
 .team-block.theme-lime .tag { background: #eff8d6; color: #3e4a00; }
-.team-block-description { text-align: center; padding: 24px 10px; min-height: 145px; }
-.team-block-description h3 { font-size: 27px; margin: 0 0 8px; overflow-wrap: anywhere; }
+.team-block-description { text-align: center; padding: 24px 12px; min-height: 144px; }
+.team-block-description h3 { font-size: 28px; margin: 0 0 8px; overflow-wrap: anywhere; }
+.team-block.theme-blue .team-block-description h3 { color: var(--blue); }
 .team-block-description p { font-size: 14px; line-height: 1.5; margin: 0; overflow-wrap: anywhere; }
 .team-block-needs { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-height: 32px; font-size: 12px; }
 .team-block-needs strong { font-weight: 600; }
