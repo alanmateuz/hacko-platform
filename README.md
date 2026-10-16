@@ -1,63 +1,114 @@
-# Hacko — v3
+# hacko↗
 
-O código-fonte agora está versionado diretamente no repositório (base: `hacko-phase01-source.zip`, a versão funcional mais recente; `hacko-v02-source.zip` era a versão estática anterior e continua preservado). Execute `pnpm install`, `pnpm test`, `pnpm check` e `pnpm build`.
+**O seu próximo desafio é aqui.** A hacko é uma plataforma de hackathons: participantes encontram eventos, montam equipes e entregam projetos; empresas publicam hackathons e acompanham inscritos, equipes e entregas em um só lugar.
 
-## Login e publicação própria
+Em produção em **[hacko.com.br](https://hacko.com.br)** · página de apresentação em **[hacko.com.br/sobre](https://hacko.com.br/sobre)**.
 
-O login com ChatGPT (dependente da hospedagem Sites) foi substituído por login próprio: cadastro com e-mail e senha (como no Beecrowd), além de Google, GitHub e LinkedIn. O perfil é completado depois de entrar. Senhas guardadas com PBKDF2; sessões no D1 (migrações `0003`–`0005`). Para publicar em hacko.com.br na Cloudflare, siga [DEPLOY.md](DEPLOY.md).
+## Funcionalidades
 
-## Novidades da v3
+### Para participantes
 
-- **Correção de inscrições/equipes.** O formulário de inscrição era exibido mesmo com o evento em rascunho ou antes da abertura, e o servidor respondia apenas "Inscrições fechadas.". Agora a página mostra o motivo (rascunho, abre em…, encerrada, lotada) e a API retorna mensagens específicas. Criar equipe sem inscrição mostra o caminho para se inscrever; o erro genérico de "regras atuais" foi substituído por verificações explícitas. Alertas de ação usam "Fechar" em vez de "Recarregar".
-- **Upload de capa do hackathon** (recorte 5:2, 1600×640) e **foto de perfil** (400×400). As imagens são redimensionadas/recomprimidas no navegador (metadados EXIF removidos), validadas por tipo e assinatura no servidor e guardadas na tabela D1 `images` (migração `0002`). Fotos de perfil só são servidas para perfis públicos ou para o próprio dono. Duplicar um evento copia a capa.
-- **Identidade visual.** Logotipo `hacko↗` (seta da marca no lugar do ✳), favicon `h↗`, padrão de setas lima ↗ / azul ↙ em hero, login e painéis escuros, opção de capa "Padrão Hacko", seleção e foco nas cores da marca.
-- **Revisão de código.** Código-fonte formatado (antes minificado em poucas linhas), contagem de inscritos disponível na página do evento, cancelamento sem inscrição ativa agora é rejeitado, novos testes para inscrição em rascunho, upload, validação de imagens e privacidade de avatar.
+- **Conta própria:** cadastro com e-mail e senha (com medidor de força), ou login com Google e GitHub. Recuperação de senha por e-mail, logout e exclusão de conta.
+- **Perfil em blocos:** foto, cidade, bio, stack, área (DEV, DESIGN, MARKETING ou NEGÓCIOS), faculdade e/ou trabalho e até duas redes sociais clicáveis (LinkedIn, GitHub, Portfólio ou Instagram). O participante escolhe o tema do cartão (azul + branco ou preto + verde), visível para todos. Visibilidade na comunidade é opcional.
+- **Explorar:** banner rotativo com os hackathons em destaque (oficiais da hacko primeiro), busca por nome/tema, cidade, formato e datas, e linhas com rolagem lateral para **Oficiais da hacko** e **Fora da hacko**.
+- **Inscrição** com aceite do regulamento e cancelamento até o início do evento. "Meus hackathons" mostra as inscrições com a etiqueta *Confirmado*.
+- **Equipes:** criar equipe (com descrição obrigatória, áreas procuradas e tema de cor), pedir para entrar, aceitar/recusar pedidos, sair ou dissolver. Card "Sua equipe" na página do evento.
+- **Convidar:** na página do hackathon, o líder de uma equipe em formação vê o botão *Convidar* nos participantes que ainda não têm equipe.
+- **Filtros por área** nas equipes e nos participantes de cada hackathon, com até três blocos por linha e rolagem lateral.
+- **Entregas:** qualquer integrante anexa fotos, PDFs (até 20 MB) e links; o líder confirma o envio e acompanha o status (aguardando envio → confirmada → em validação → validada / revisar envio).
+- **Comunidade:** perfis públicos com filtros, e **Radar com IA** para encontrar oportunidades na web com fontes para conferir.
+- **Notificações** no sino do topo e confirmações em um popup no visual da hacko.
 
-## Fase 01 (histórico)
+### Para empresas
 
-Núcleo funcional baseado no PRD v1.0 e na identidade visual do [Figma](https://www.figma.com/design/YWBXllkKdflwpesUc2kthv).
+- **Conta de empresa** com perfil da organização: nome, logo, site, CNPJ, cidade, redes e responsável.
+- **Hackathons:** criar, editar, duplicar, publicar e arquivar, com regras, datas, vagas, tamanho de equipe, prazo de entrega e capa.
+- **Cor do banner:** 7 cores da paleta ou uma cor personalizada (seletor de cor ou código hexadecimal), com prévia ao vivo e contraste automático do texto.
+- **Fora da hacko:** marcar um hackathon como externo (inscrição oficial no site do organizador, equipes formadas aqui).
+- **Painel do evento:** inscritos de A–Z ou por equipe, equipes com status, entregas com anexos e validação (em validação, validada ou pedir ajustes com comentário).
+- **Inscritos e equipes** de todos os eventos da empresa em uma visão.
+- **TeamMatch:** sugestão de equipes para quem ficou sem time, com revisão e aprovação pela organização.
 
-## Executar e verificar
+### Landing page (`/sobre`)
 
-Node >=22.13, pnpm 11.25.0. Instale com `pnpm install`, execute `pnpm test`, `pnpm check` e `pnpm build`. O ambiente de desenvolvimento segue os scripts de Sites/Vinext. Nunca injete identidade de teste em produção.
+Apresentação para participantes e empresas, com navegação por seções, carrossel dos hackathons ativos (atualizado automaticamente), planos, perguntas frequentes e contatos.
 
-O frontend React usa rotas por hash e a API `/api/hacko`. O servidor usa Vinext/Cloudflare Workers, com banco D1. A plataforma fornece a identidade autenticada. `.openai/hosting.json` declara o banco; as migrações em `drizzle/` são aplicadas pela publicação Sites.
+## Tecnologia
 
-## O que funciona
+| Camada | Uso |
+|---|---|
+| Front-end | React (SPA com rotas por hash) em `app/hacko.tsx`; landing em `app/sobre/` |
+| Servidor | Vinext (app router estilo Next) em **Cloudflare Workers** |
+| API | `app/api/hacko/route.ts` (`GET ?action=` e `POST {op}`), autenticação em `app/api/auth/*` |
+| Banco | **Cloudflare D1** (SQLite) com migrações Drizzle em `drizzle/` |
+| Arquivos | **Cloudflare R2** (bucket `hacko-files`) para anexos das entregas; imagens de capa, logo e avatar no D1 |
+| E-mail | Resend (recuperação de senha) |
 
-- Acesso com ChatGPT; perfil de participante, visibilidade opt-in e links informados.
-- Uma conta pode participar e administrar suas próprias organizações. A autorização é verificada no servidor, por organização e objeto.
-- Eventos: rascunho, edição, publicação explícita, duplicação e arquivamento; regras, datas, vagas e limites de equipe.
-- Catálogo pesquisável por nome/tema, cidade, modalidade e intervalo de datas.
-- Inscrição com declaração de elegibilidade e aceite do regulamento; cancelamento até o início, após sair da equipe.
-- Equipes: criação, busca, solicitações, convites entre inscritos, aceite/recusa, saída e dissolução pelo líder. Confirmação pelo organizador exige tamanho válido.
-- Painel com inscrições, vagas, participantes sem equipe e histórico de ações.
-- TeamMatch determinístico: preserva equipes existentes, agrupa por disponibilidade declarada e complementa competências. Propostas versionadas, revisão e aprovação explícita; mudanças invalidam propostas anteriores.
-- Notificações internas e favoritos persistidos no servidor.
-- Radar com OpenAI: interpretação de filtros do catálogo ou busca externa na web, com citações, fontes e data da consulta. Máximo de 20 buscas/dia por usuário; sem publicação automática.
+Segurança: senhas com PBKDF2, sessões guardadas apenas como hash, cookies HttpOnly, CSRF por origem, autorização verificada no servidor por organização e objeto, tipo de arquivo conferido pelo conteúdo e limites de inscrição/equipe garantidos por índices únicos e verificações SQL em batch transacional.
 
-## Configuração de IA
+## Estrutura
 
-`OPENAI_API_KEY` deve existir somente como segredo do ambiente. Arquivos `.env*` estão ignorados pelo Git. A chave jamais é enviada ao frontend. O radar usa Responses API com `store:false`, limite de saída e timeout. A busca web pode ter cobrança própria e seus resultados precisam ser conferidos nas fontes oficiais. Falhas e falta de créditos são apresentadas ao usuário.
+```
+app/
+  hacko.tsx            app principal (participantes e empresas)
+  sobre/               landing page
+  api/hacko/route.ts   API da plataforma
+  api/auth/*           cadastro, login, OAuth, logout, recuperação de senha
+  api/files            download de anexos das entregas
+  privacidade/ termos/ páginas legais
+lib/                   autenticação, entregas (R2), validação (zod), domínio
+db/schema.ts           esquema do banco
+drizzle/               migrações SQL
+tests/                 testes da API
+public/                marca, favicon e imagens da landing
+```
 
-## Integridade e testes
+## Rodar localmente
 
-`tests/phase01.test.mjs` executa o handler real da API com identidade simulada e adaptador D1 sobre SQLite em memória. Verifica autenticação, CSRF, isolamento de organizações, rascunhos ocultos, privacidade de e-mail/perfil, capacidade, inscrição idempotente, uma equipe por evento, tamanho mínimo/máximo, permissões do líder, cancelamento e rollback. Testa TeamMatch com 20/100/300 participantes, dados ausentes e limites diferentes, sem duplicidades ou omissões.
+Requisitos: Node 22.13+ e pnpm.
 
-Restrições de inscrição e equipe também são impostas por índices únicos e verificações SQL dentro do mesmo batch transacional. A migração inicial foi corrigida após falhar antes da publicação; os guards SQL substituem triggers não aceitos pelo executor da hospedagem. Chamadas múltiplas usam batch transacional. Dados de teste não são inseridos em produção.
+```bash
+pnpm install
+pnpm dev
+```
 
-## Limites desta fase
+O site abre em `http://localhost:5173`. Verificações:
 
-- Login e recuperação usam a conta ChatGPT, sem senha própria da Hacko. A hospedagem permanece privada, conforme o acesso existente; convites de teste para outras pessoas exigem configurar acesso ao site.
-- A conta proprietária administra a organização. Delegação a outros administradores, plataforma admin, LGPD/exportação/exclusão, moderação e e-mails transacionais ainda não estão implementados.
-- TeamMatch permite revisar e aprovar, mas não editar individualmente a composição dentro da proposta. Para ajustes, use as equipes manuais e gere uma proposta nova.
-- O radar é executado por consulta, sem rastreamento agendado, importação automática ou garantia de inscrições abertas.
-- O copiloto de regulamento/agenda (P1), pagamentos, jurados e recrutamento ficam fora desta fase.
-- Os três eventos fictícios da versão estática não são convertidos em registros reais. O catálogo começa vazio até uma organização publicar eventos.
-- Não houve QA visual em navegador nesta execução: o ambiente não oferece o plugin control-browser exigido pelo fluxo de Sites. Build e testes de API não substituem teste com usuários reais.
+```bash
+pnpm test
+```
 
-## Identidade e créditos
+```bash
+pnpm check
+```
 
-Azul #0367FC, azul de ação #0057D9, lima #D2F801 e carvão #161616. Space Grotesk e Manrope continuam substitutas provisórias de Clash Display e Gilroy. Layout responsivo, foco visível, rótulos de campos e estados de erro/carregamento.
+```bash
+pnpm build
+```
 
-Fotos ilustrativas com licença Unsplash (não domínio público): George Dagerotip https://unsplash.com/photos/gQxpuAU6mLU; Jj Englert https://unsplash.com/photos/H2pfrqhQou8; Creatopy https://unsplash.com/photos/M35xxKGb_tA.
+Ao alterar `db/schema.ts`, gere a migração com `pnpm db:generate`.
+
+## Deploy
+
+Cada pull request roda testes e build no GitHub Actions. O merge na `main` aplica as migrações do D1 e publica o Worker em hacko.com.br automaticamente. Detalhes e configuração inicial da Cloudflare em [DEPLOY.md](DEPLOY.md).
+
+Segredos do Worker:
+
+| Variável | Uso |
+|---|---|
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Login com Google |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | Login com GitHub |
+| `RESEND_API_KEY` | E-mail de recuperação de senha |
+| `OPENAI_API_KEY` | Radar com IA (opcional; sem ela o radar fica desativado) |
+
+Nenhum segredo vai para o front-end; arquivos `.env*` são ignorados pelo Git.
+
+## Testes
+
+`tests/phase01.test.mjs` executa os handlers reais da API sobre SQLite em memória e um R2 simulado. Cobre autenticação, CSRF, isolamento entre organizações, rascunhos ocultos, privacidade de perfil, vagas, inscrição idempotente, uma equipe por evento, tamanho mínimo/máximo, permissões do líder, descrição obrigatória da equipe, entregas com anexos, contas de empresa e TeamMatch com 20, 100 e 300 participantes.
+
+## Identidade visual
+
+Azul `#0367FC`, verde-limão `#D2F801`, branco `#FFFFFF` e preto `#161616`. Tipografia Space Grotesk (títulos) e Manrope (texto). Wordmark `hacko↗`, ícone `h↗` e padrão de setas ↗ verde / ↙ azul.
+
+Fotos ilustrativas com licença Unsplash: George Dagerotip (https://unsplash.com/photos/gQxpuAU6mLU), Jj Englert (https://unsplash.com/photos/H2pfrqhQou8) e Creatopy (https://unsplash.com/photos/M35xxKGb_tA).
