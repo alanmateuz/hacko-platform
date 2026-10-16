@@ -499,6 +499,58 @@ function ResetPassword() {
     </form>
   );
 }
+// Confirmação no meio da tela com o visual do hacko (substitui o confirm() do navegador).
+type ConfirmRequest = { message: string; resolve: (ok: boolean) => void };
+let openConfirm: ((r: ConfirmRequest) => void) | null = null;
+function askConfirm(message: string) {
+  return new Promise<boolean>((resolve) =>
+    openConfirm ? openConfirm({ message, resolve }) : resolve(window.confirm(message)),
+  );
+}
+function ConfirmHost() {
+  const [req, setReq] = useState<ConfirmRequest | null>(null);
+  const okRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    openConfirm = setReq;
+    return () => {
+      openConfirm = null;
+    };
+  }, []);
+  const close = (ok: boolean) => {
+    req?.resolve(ok);
+    setReq(null);
+  };
+  useEffect(() => {
+    if (!req) return;
+    okRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close(false);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+  if (!req) return null;
+  return (
+    <div className="confirm-backdrop" onClick={() => close(false)}>
+      <div
+        className="confirm-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <Logo />
+        <h2 id="confirm-title">{req.message}</h2>
+        <div className="confirm-actions">
+          <button type="button" className="secondary" onClick={() => close(false)}>
+            Cancelar
+          </button>
+          <button type="button" ref={okRef} onClick={() => close(true)}>
+            Confirmar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 function DeleteAccount() {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
@@ -1617,8 +1669,8 @@ function TeamDelivery({
         items={items}
         onRemove={
           canEdit
-            ? (i) => {
-                if (confirm(`Remover "${i.name}" da entrega?`))
+            ? async (i) => {
+                if (await askConfirm(`Remover "${i.name}" da entrega?`))
                   onAction({ op: "delivery.remove", id: team.id, itemId: i.id });
               }
             : undefined
@@ -1860,8 +1912,8 @@ export default function Hacko() {
     <button
       disabled={busy}
       className="secondary"
-      onClick={() => {
-        if (!confirmation || confirm(confirmation))
+      onClick={async () => {
+        if (!confirmation || (await askConfirm(confirmation)))
           mutate({ ...body, ...(confirmation ? { confirm: true } : {}) }, next);
       }}
     >
@@ -3067,6 +3119,7 @@ export default function Hacko() {
   }
   return (
     <>
+      <ConfirmHost />
       <a className="skip" href="#main">
         Pular para conteúdo
       </a>
