@@ -11,6 +11,12 @@ export const profiles = sqliteTable("profiles", {
   availability: text("availability").notNull().default(""),
   linkedin: text("linkedin").notNull().default(""),
   github: text("github").notNull().default(""),
+  portfolio: text("portfolio").notNull().default(""),
+  instagram: text("instagram").notNull().default(""),
+  school: text("school").notNull().default(""),
+  workplace: text("workplace").notNull().default(""),
+  area: text("area").notNull().default(""),
+  cardTheme: text("card_theme").notNull().default("blue"),
   visible: integer("visible").notNull().default(0),
 });
 export const organizations = sqliteTable("organizations", {
@@ -82,6 +88,9 @@ export const teams = sqliteTable("teams", {
   skills: text("skills").notNull(),
   description: text("description").notNull().default(""),
   status: text("status").notNull().default("forming"),
+  cardTheme: text("card_theme").notNull().default("blue"),
+  // Áreas que a equipe procura (DEV, DESIGN, MARKETING, NEGÓCIOS), separadas por vírgula.
+  areas: text("areas").notNull().default(""),
   // Entrega do projeto: none | submitted | reviewing | evaluated | pending.
   submissionStatus: text("submission_status").notNull().default("none"),
   submissionUrl: text("submission_url").notNull().default(""),

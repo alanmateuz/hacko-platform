@@ -227,7 +227,7 @@ export async function GET(request: Request) {
         events: catalog,
         registrations: user
           ? await all(
-              "SELECT r.*,e.title FROM registrations r JOIN events e ON e.id=r.event_id WHERE r.user_id=?",
+              `SELECT e.*,o.name organization,${counts},r.event_id,e.status event_status,r.status,r.status registration_status,r.created_at registered_at FROM registrations r JOIN events e ON e.id=r.event_id JOIN organizations o ON o.id=e.org_id WHERE r.user_id=?`,
               user.userId,
             )
           : [],
@@ -272,7 +272,7 @@ export async function GET(request: Request) {
           : null,
         teams: await teamRows(id),
         participants: await all(
-          `SELECT p.id,p.name,p.skills,p.bio,p.city,p.availability,p.linkedin,p.github,(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v FROM profiles p JOIN registrations r ON r.user_id=p.id WHERE r.event_id=? AND r.status='active' AND p.visible=1`,
+          `SELECT p.id,p.name,p.skills,p.bio,p.city,p.availability,p.linkedin,p.github,p.portfolio,p.instagram,p.school,p.workplace,p.area,p.card_theme,(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v,EXISTS(SELECT 1 FROM team_members m WHERE m.user_id=p.id AND m.event_id=r.event_id) in_team FROM profiles p JOIN registrations r ON r.user_id=p.id WHERE r.event_id=? AND r.status='active' AND p.visible=1`,
           id,
         ),
       });
@@ -281,7 +281,7 @@ export async function GET(request: Request) {
     if (action === "participants")
       return json({
         participants: await all(
-          "SELECT p.id,p.name,p.bio,p.skills,p.city,p.availability,p.linkedin,p.github,(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v FROM profiles p WHERE visible=1 ORDER BY name LIMIT 500",
+          "SELECT p.id,p.name,p.bio,p.skills,p.city,p.availability,p.linkedin,p.github,p.portfolio,p.instagram,p.school,p.workplace,p.area,p.card_theme,(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v FROM profiles p WHERE visible=1 ORDER BY name LIMIT 500",
         ),
       });
     const u = await auth();
@@ -331,7 +331,7 @@ export async function GET(request: Request) {
     if (action === "mine")
       return json({
         teams: await all(
-          "SELECT t.*,e.title event_title FROM teams t JOIN team_members m ON m.team_id=t.id JOIN events e ON e.id=t.event_id WHERE m.user_id=?",
+          "SELECT t.*,e.title event_title,e.team_max,(SELECT count(*) FROM team_members x WHERE x.team_id=t.id) members FROM teams t JOIN team_members m ON m.team_id=t.id JOIN events e ON e.id=t.event_id WHERE m.user_id=?",
           u.userId,
         ),
         invites: await all(
@@ -532,7 +532,7 @@ export async function POST(request: Request) {
     if (op === "profile") {
       const p = profileSchema.parse(body.data);
       await stmt(
-        `INSERT INTO profiles(id,name,email,bio,skills,interests,city,availability,linkedin,github,visible) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,bio=excluded.bio,skills=excluded.skills,interests=excluded.interests,city=excluded.city,availability=excluded.availability,linkedin=excluded.linkedin,github=excluded.github,visible=excluded.visible`,
+        `INSERT INTO profiles(id,name,email,bio,skills,interests,city,availability,linkedin,github,visible,portfolio,instagram,school,workplace,area,card_theme) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,email=excluded.email,bio=excluded.bio,skills=excluded.skills,interests=excluded.interests,city=excluded.city,availability=excluded.availability,linkedin=excluded.linkedin,github=excluded.github,visible=excluded.visible,portfolio=excluded.portfolio,instagram=excluded.instagram,school=excluded.school,workplace=excluded.workplace,area=excluded.area,card_theme=excluded.card_theme`,
         u.userId,
         p.name,
         u.email,
@@ -544,6 +544,7 @@ export async function POST(request: Request) {
         p.linkedin,
         p.github,
         p.visible ? 1 : 0,
+        p.portfolio,p.instagram,p.school,p.workplace,p.area,p.card_theme,
       ).run();
       return json({ ok: true });
     }
@@ -777,13 +778,15 @@ export async function POST(request: Request) {
         fail("Você já faz parte de uma equipe neste evento.", 409);
       await db().batch([
         stmt(
-          "INSERT INTO teams(id,event_id,leader_id,name,skills,description) VALUES(?,?,?,?,?,?)",
+          "INSERT INTO teams(id,event_id,leader_id,name,skills,description,card_theme,areas) VALUES(?,?,?,?,?,?,?,?)",
           tid,
           d.event_id,
           u.userId,
           d.name,
           d.skills,
           d.description,
+          d.card_theme,
+          d.areas,
         ),
         memberGuard(tid, d.event_id, u.userId),
         stmt("INSERT INTO team_members(team_id,event_id,user_id) VALUES(?,?,?)", tid, d.event_id, u.userId),
@@ -1058,13 +1061,14 @@ export async function POST(request: Request) {
         const tid = uid();
         statements.push(
           stmt(
-            "INSERT INTO teams(id,event_id,leader_id,name,skills,description) VALUES(?,?,?,?,?,?)",
+            "INSERT INTO teams(id,event_id,leader_id,name,skills,description,card_theme) VALUES(?,?,?,?,?,?,?)",
             tid,
             e.id,
             group.members[0],
             "Equipe " + n++ + " · " + id.slice(0, 4),
             group.skills.join(", "),
             "Formação assistida aprovada pela organização",
+            "blue",
           ),
         );
         for (const pid of group.members)
