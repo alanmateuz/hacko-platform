@@ -2255,3 +2255,15 @@ main:has(.mine-saved, .community-page) > footer.site-footer.site-footer { margin
   .site-footer-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .site-footer-bottom { flex-direction: column; align-items: flex-start; }
 }
+/* Rodapé idêntico em todas as páginas (anula estilos de rodapé específicos de página) */
+main > footer.site-footer.site-footer, main > footer.site-footer.site-footer * { font-size: inherit; line-height: 1.5; text-decoration: none; text-transform: none; letter-spacing: normal; border-top: 0; }
+main > footer.site-footer.site-footer { font-size: 14px; color: #e6e6e6; margin-top: 64px !important; padding-top: 56px !important; padding-bottom: 32px !important; }
+main > footer.site-footer.site-footer .site-footer-top { border-bottom: 1px solid #444; }
+main > footer.site-footer.site-footer .wordmark { font-size: 30px; line-height: 1; color: #fff; }
+main > footer.site-footer.site-footer h2 { font-size: 14px; color: #fff; }
+main > footer.site-footer.site-footer p { color: #bdbdbd; }
+main > footer.site-footer.site-footer small { font-size: 12px; color: #9e9e9e; }
+main > footer.site-footer.site-footer .site-footer-brand a { color: #fff; }
+main > footer.site-footer.site-footer .site-footer-cols a, main > footer.site-footer.site-footer .site-footer-social a { color: #bdbdbd; }
+main > footer.site-footer.site-footer a:hover { color: var(--lime); }
+main > footer.site-footer.site-footer .site-footer-lang { border: 1px solid #555; color: #e6e6e6; }

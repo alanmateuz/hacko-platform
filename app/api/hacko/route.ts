@@ -269,7 +269,7 @@ export async function GET(request: Request) {
         events: catalog,
         registrations: user
           ? await all(
-              `SELECT e.*,o.name organization,${counts},r.event_id,e.status event_status,r.status,r.status registration_status,r.created_at registered_at FROM registrations r JOIN events e ON e.id=r.event_id JOIN organizations o ON o.id=e.org_id WHERE r.user_id=?`,
+              `SELECT e.*,o.name organization,${counts},r.event_id,e.status event_status,r.status,r.status registration_status,r.created_at registered_at FROM registrations r JOIN events e ON e.id=r.event_id JOIN organizations o ON o.id=e.org_id WHERE r.user_id=? AND e.status='published'`,
               user.userId,
             )
           : [],
@@ -376,11 +376,11 @@ export async function GET(request: Request) {
     if (action === "mine")
       return json({
         teams: await all(
-          "SELECT t.*,e.title event_title,e.team_max,(SELECT count(*) FROM team_members x WHERE x.team_id=t.id) members FROM teams t JOIN team_members m ON m.team_id=t.id JOIN events e ON e.id=t.event_id WHERE m.user_id=?",
+          "SELECT t.*,e.title event_title,e.team_max,(SELECT count(*) FROM team_members x WHERE x.team_id=t.id) members FROM teams t JOIN team_members m ON m.team_id=t.id JOIN events e ON e.id=t.event_id WHERE m.user_id=? AND e.status='published'",
           u.userId,
         ),
         invites: await all(
-          "SELECT r.*,t.name,t.event_id FROM team_requests r JOIN teams t ON t.id=r.team_id WHERE r.user_id=? AND r.kind='invite' AND r.status='pending'",
+          "SELECT r.*,t.name,t.event_id FROM team_requests r JOIN teams t ON t.id=r.team_id JOIN events e ON e.id=t.event_id WHERE r.user_id=? AND r.kind='invite' AND r.status='pending' AND e.status='published'",
           u.userId,
         ),
       });
