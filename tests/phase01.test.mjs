@@ -185,8 +185,20 @@ test("fase 01: autenticação, isolamento e jornada de evento/equipe", async () 
     image: 0,
     source: "",
   };
+  // sem logo da empresa não dá para criar hackathon
+  assert.equal((await post({ op: "event.save", orgId: org, data })).status, 400);
+  const logo =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  assert.equal((await post({ op: "image.upload", kind: "logo", id: org, data: logo })).status, 200);
   event = (await post({ op: "event.save", orgId: org, data })).body.id;
   assert.ok(event);
+  // parceiros: organização, patrocínio e apoio, só a empresa dona edita
+  const partner = await post({ op: "partner.save", id: event, data: { name: "Unifor Hub", role: "sponsor", url: "" }, logo });
+  assert.equal(partner.status, 200);
+  assert.equal((await post({ op: "partner.save", id: event, data: { name: "X", role: "chefe", url: "" } })).status, 400);
+  assert.equal((await post({ op: "partner.save", id: event, data: { name: "Apoio", role: "supporter", url: "" } })).status, 200);
+  assert.equal((await post({ op: "partner.move", id: event, partnerId: partner.body.id, dir: 1 })).status, 200);
+  assert.deepEqual((await get("manage", event)).body.partners.map((p) => p.name), ["Apoio", "Unifor Hub"]);
   assert.equal((await get("bootstrap")).body.events.length, 0);
   as("other");
   assert.equal((await get("manage", event)).status, 403);
@@ -198,6 +210,11 @@ test("fase 01: autenticação, isolamento e jornada de evento/equipe", async () 
   assert.equal(companyReg.status, 403);
   assert.match(companyReg.body.error, /empresa/);
   assert.equal((await post({ op: "event.publish", id: event })).status, 400);
+  // banner e card são obrigatórios para publicar
+  assert.equal((await post({ op: "event.publish", id: event, confirm: true })).status, 400);
+  assert.equal((await post({ op: "image.upload", kind: "cover", id: event, data: logo })).status, 200);
+  assert.equal((await post({ op: "event.publish", id: event, confirm: true })).status, 400);
+  assert.equal((await post({ op: "image.upload", kind: "card", id: event, data: logo })).status, 200);
   assert.equal((await post({ op: "event.publish", id: event, confirm: true })).status, 200);
   for (const id of ["alice", "bob", "carol"]) {
     as(id);

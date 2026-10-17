@@ -18,10 +18,69 @@ function Logo({ arrow = "var(--lime)" }: { arrow?: string }) {
     </span>
   );
 }
+// Rodapé do site: marca e contato, colunas de links, copyright e redes sociais.
+const FOOTER_COLUMNS: [string, [string, string][]][] = [
+  ["Plataforma", [["Explorar hackathons", "#/"], ["Meus hackathons", "#/mine"], ["Oportunidades", "#/radar"], ["Criar um hackathon", "#/company"]]],
+  ["Comunidade", [["Participantes", "#/community"], ["Equipes", "#/community"], ["Ganhadores", "#/community"], ["Blog", "https://blog.hacko.com.br"]]],
+  ["Empresa", [["Sobre a hacko", "/sobre"], ["Para empresas", "/sobre#empresas"], ["Imprensa", "mailto:imprensa@hacko.com.br"], ["Contato", "mailto:contato@hacko.com.br"]]],
+  ["Ajuda", [["Suporte", "mailto:suporte@hacko.com.br"], ["Termos de uso", "/termos"], ["Privacidade", "/privacidade"]]],
+];
+const SOCIALS: [string, string, React.ReactNode][] = [
+  ["Instagram", "https://instagram.com/hacko.br", <><rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="12" cy="12" r="4" /><circle cx="17.5" cy="6.5" r="0.6" fill="currentColor" /></>],
+  ["LinkedIn", "https://linkedin.com/company/hacko-br", <><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M8 10v7M8 7v.01M12 17v-4a2 2 0 0 1 4 0v4M12 10v7" /></>],
+  ["X", "https://x.com/hacko_br", <path d="M4 4l16 16M20 4L4 20" />],
+  ["Discord", "https://discord.gg/hacko", <><path d="M7 7c3-1.5 7-1.5 10 0l2 9c-2 2-4 2.5-5 2.5l-1-1.5M7 7l-2 9c2 2 4 2.5 5 2.5l1-1.5" /><circle cx="9.5" cy="12.5" r="1" /><circle cx="14.5" cy="12.5" r="1" /></>],
+];
+function SiteFooter() {
+  const external = (u: string) => /^https?:/.test(u);
+  return (
+    <footer className="site-footer">
+      <div className="site-footer-top">
+        <div className="site-footer-brand">
+          <Logo />
+          <p>A plataforma para criar e participar de hackathons.</p>
+          <a href="mailto:contato@hacko.com.br">contato@hacko.com.br</a>
+          <small>Fortaleza, CE · Brasil</small>
+        </div>
+        <nav className="site-footer-cols" aria-label="Rodapé">
+          {FOOTER_COLUMNS.map(([title, links]) => (
+            <div key={title}>
+              <h2>{title}</h2>
+              <ul>
+                {links.map(([label, url]) => (
+                  <li key={label}>
+                    <a href={url} {...(external(url) ? { target: "_blank", rel: "noreferrer" } : {})}>
+                      {label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </nav>
+      </div>
+      <div className="site-footer-bottom">
+        <small>© {new Date().getFullYear()} hacko. Todos os direitos reservados. Fotos ilustrativas: Unsplash.</small>
+        <div className="site-footer-social">
+          {SOCIALS.map(([name, url, icon]) => (
+            <a key={name} href={url} target="_blank" rel="noreferrer" aria-label={"hacko no " + name}>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {icon}
+              </svg>
+            </a>
+          ))}
+        </div>
+        <span className="site-footer-lang">Português (Brasil)</span>
+      </div>
+    </footer>
+  );
+}
 const photo = (n = 0) => (n === 3 ? "/brand/cover.svg" : `/assets/photo${n}.jpg`);
 const imageUrl = (key: string, v: string) =>
   `/api/hacko?action=image&id=${encodeURIComponent(key)}&v=${encodeURIComponent(v)}`;
 const coverOf = (e: Row) => (e.cover_v ? imageUrl("cover:" + e.id, e.cover_v) : photo(e.image));
+// Imagem do card (2:1) dos hackathons; sem ela, usa o banner.
+const cardOf = (e: Row) => (e.card_v ? imageUrl("card:" + e.id, e.card_v) : coverOf(e));
 function Avatar({ p, size }: { p: Row; size?: "lg" }) {
   const initials = (p.name || "?").slice(0, 2).toUpperCase();
   return (
@@ -85,7 +144,7 @@ function ImageInput({ label, help, current, aspect, onChange }: any) {
               try {
                 const data = await resizeImage(
                   f,
-                  ...((aspect === "square" ? [400, 400, true] : [1600, 640, true]) as [
+                  ...(({ square: [400, 400, true], banner: [1920, 480, true], card: [800, 400, true] }[aspect as string] || [1600, 640, true]) as [
                     number,
                     number,
                     boolean,
@@ -286,6 +345,8 @@ const bannerStyle = (key?: string) => {
     "--banner-ink": c.ink,
     "--banner-accent": c.accent,
     "--banner-accent-ink": c.accentInk,
+    // Texto na cor do evento sobre fundo branco (cores claras viram preto para manter contraste).
+    "--banner-text": c.ink === "#161616" ? "#161616" : c.bg,
   } as React.CSSProperties;
 };
 function BannerColorPicker({ value = "blue", title }: { value?: string; title?: string }) {
@@ -467,6 +528,83 @@ function CommunityPage({ data }: { data: Row }) {
   );
 }
 // Resultado do hackathon (painel da empresa): escolhe as equipes em 1º, 2º e 3º lugar.
+const PARTNER_ROLES: Record<string, string> = { organizer: "Organização", sponsor: "Patrocínio", supporter: "Apoio" };
+// Painel da empresa: quem aparece na página do hackathon como organização, patrocínio ou apoio.
+function PartnersPanel({ partners, busy, onSave, onMove, onDelete }: any) {
+  const [editing, setEditing] = useState<Row | null>(null);
+  const logo = useRef<string | null | undefined>(undefined);
+  const p = editing || {};
+  return (
+    <section className="panel partners-panel">
+      <h2>Organização e patrocinadores</h2>
+      <p>
+        Aparecem na página do hackathon ao lado da sua empresa, nas seções Organização, Patrocínio e Apoio. Até 12.
+      </p>
+      {partners.length > 0 && (
+        <ul className="partners-list">
+          {partners.map((x: Row, i: number) => (
+            <li key={x.id}>
+              <PartnerLogo p={x} />
+              <div>
+                <b>{x.name}</b>
+                <small>{PARTNER_ROLES[x.role]}</small>
+              </div>
+              <div className="actions">
+                <button className="secondary" disabled={busy || i === 0} onClick={() => onMove(x.id, -1)} aria-label={"Subir " + x.name}>↑</button>
+                <button className="secondary" disabled={busy || i === partners.length - 1} onClick={() => onMove(x.id, 1)} aria-label={"Descer " + x.name}>↓</button>
+                <button className="secondary" disabled={busy} onClick={() => { logo.current = undefined; setEditing(x); }}>Editar</button>
+                <button className="secondary danger" disabled={busy} onClick={() => onDelete(x)}>Remover</button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Form
+        key={p.id || "new-" + partners.length}
+        busy={busy}
+        label={editing ? "Salvar alterações" : "Adicionar"}
+        onSubmit={async (v: Row) => {
+          await onSave({ partnerId: p.id || "", data: { name: v.name, role: v.role, url: v.url }, logo: logo.current });
+          logo.current = undefined;
+          setEditing(null);
+        }}
+      >
+        <h3>{editing ? "Editar " + p.name : "Adicionar parceiro"}</h3>
+        <div className="form-grid">
+          <Field name="name" label="Nome" value={p.name} required />
+          <label>
+            Papel
+            <select name="role" defaultValue={p.role || "organizer"}>
+              {Object.entries(PARTNER_ROLES).map(([k, l]) => (
+                <option key={k} value={k}>{l}</option>
+              ))}
+            </select>
+          </label>
+          <Field name="url" label="Site (opcional)" type="url" value={p.url} help="https://…" />
+        </div>
+        <ImageInput
+          label="Logo (opcional)"
+          help="Quadrada. Aparece redonda na página do hackathon."
+          current={p.logo_v ? imageUrl("partner:" + p.id, p.logo_v) : ""}
+          aspect="square"
+          onChange={(d: string | null) => (logo.current = d)}
+        />
+        {editing && (
+          <button type="button" className="secondary" onClick={() => setEditing(null)}>
+            Cancelar edição
+          </button>
+        )}
+      </Form>
+    </section>
+  );
+}
+function PartnerLogo({ p }: { p: Row }) {
+  return p.logo_v ? (
+    <img className="partner-logo" src={imageUrl("partner:" + p.id, p.logo_v)} alt="" />
+  ) : (
+    <span className="partner-logo">{p.name.slice(0, 1).toUpperCase()}</span>
+  );
+}
 function ResultsPanel({ teams, placements, busy, onSave }: { teams: Row[]; placements: Row[]; busy: boolean; onSave: (p: string[]) => void }) {
   const initial = [1, 2, 3].map((n) => placements.find((p) => p.place === n)?.team_id || "");
   const [places, setPlaces] = useState<string[]>(initial);
@@ -2244,9 +2382,14 @@ function Card({ e, registration }: any) {
   const ended = !!registration && e.ends_at <= new Date().toISOString();
   const mine = registration === "active" ? (ended ? "ended" : e.external ? "pending" : "confirmed") : registration ? "cancelled" : "";
   const label = registration ? ({ ended: "Encerrado", pending: "Pendente", confirmed: "Confirmado", cancelled: "Cancelado" } as Record<string, string>)[mine] : ({ open: "Inscrições", closed: "Inscrições encerradas", soon: "Em breve", full: "Vagas esgotadas", draft: "Indisponível" }[state]);
-  return <article className={"card event-block" + (mine === "ended" || mine === "cancelled" ? " is-ended" : "")}><a href={href("/event/" + e.id)}>
-    <div className="event-block-cover"><img src={coverOf(e)} alt={"Capa de " + e.title} loading="lazy"/><span className={"event-block-status" + (mine ? " mine-" + mine : !registration && state !== "open" ? " inactive" : "")}>{label}</span></div>
-    <div className="card-body"><p className="event-organization">{e.organization}</p><h3>{e.title}</h3><p className="event-date">{date(e.starts_at)}</p><p className="event-address">{[e.city, e.venue].filter(Boolean).join(" — ")}</p><div className="tags"><span className="tag">{e.format}</span><span className="tag">{e.theme}</span></div></div>
+  return <article className={"card event-block" + (mine === "ended" || mine === "cancelled" ? " is-ended" : "")} style={bannerStyle(e.banner_color)}><a href={href("/event/" + e.id)}>
+    <div className="event-block-cover"><img src={cardOf(e)} alt={"Capa de " + e.title} loading="lazy"/><span className={"event-block-status" + (mine ? " mine-" + mine : !registration && state !== "open" ? " inactive" : "")}>{label}</span></div>
+    <div className="card-body">
+      <div className="event-block-meta">
+        <span className="event-block-logo">{e.logo_v ? <img src={imageUrl("logo:" + e.org_id, e.logo_v)} alt="" loading="lazy"/> : (e.organization || "?").slice(0, 2).toUpperCase()}</span>
+        {e.participants != null && <span className="event-block-count" aria-label={e.participants + " participantes"}><Icon name="people"/>{e.participants}</span>}
+      </div>
+      <p className="event-organization">{e.organization}</p><h3>{e.title}</h3><p className="event-date">{date(e.starts_at)}</p><p className="event-address">{[e.city, e.venue].filter(Boolean).join(" — ")}</p><div className="tags"><span className="tag">{e.format}</span><span className="tag">{e.theme}</span></div></div>
   </a></article>;
 }
 // Card compacto dos hackathons de fora da hacko (topo na cor do banner, seta grande).
@@ -2268,11 +2411,57 @@ function OutsideCard({ e }: { e: Row }) {
     </article>
   );
 }
-function Teams({ items = [], row = false, per = 3 }: any) {
+const dayMonth = (at: string) =>
+  new Date(at).toLocaleDateString("pt-BR", { day: "numeric", month: "short" });
+// Ícones de linha da página do evento (mesmo traço do Canva).
+const ICONS: Record<string, React.ReactNode> = {
+  calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></>,
+  pin: <><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z" /><circle cx="12" cy="9.5" r="2.5" /></>,
+  team: <><circle cx="12" cy="8" r="3" /><circle cx="5" cy="10" r="2.2" /><circle cx="19" cy="10" r="2.2" /><path d="M6.5 20a5.5 5.5 0 0 1 11 0M1.5 19a3.5 3.5 0 0 1 5-3.2M22.5 19a3.5 3.5 0 0 0-5-3.2" /></>,
+  people: <><circle cx="9" cy="8" r="3.5" /><circle cx="17" cy="9" r="2.5" /><path d="M2 20a7 7 0 0 1 14 0zM15 20h7a5 5 0 0 0-7.5-4.3" /></>,
+  stairs: <path d="M3 20h6v-5h5v-5h5V5h3" />,
+  link: <><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></>,
+  org: <><circle cx="12" cy="12" r="9" /><path d="M8 15l4-7 4 7" /></>,
+};
+function Icon({ name }: { name: string }) {
+  return (
+    <svg className={"icon icon-" + name} viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {ICONS[name]}
+    </svg>
+  );
+}
+const shortDay =(at: string) => new Date(at).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+// Timeline do hackathon na cor do evento: etapas já passadas ficam preenchidas.
+function Timeline({ e }: { e: Row }) {
+  const steps = [
+    ["Início das inscrições", e.opens_at],
+    ["Fim das inscrições", e.closes_at],
+    ["Início do evento", e.starts_at],
+    ["Entrega dos projetos", e.submission_deadline || e.ends_at],
+    ["Pitch e anúncio dos ganhadores", e.ends_at],
+  ].filter(([, at]) => at);
+  const now = new Date().toISOString();
+  return (
+    <section className="event-timeline" style={bannerStyle(e.banner_color)} aria-label="Timeline do hackathon">
+      <h2>Timeline</h2>
+      <ol>
+        {steps.map(([label, at]) => (
+          <li key={label} className={at <= now ? "done" : ""}>
+            <b>{label}</b>
+            <time dateTime={at}>{shortDay(at)}</time>
+            <span className="dot" aria-hidden="true" />
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+// color: cor do hackathon (página do evento); sem ela, vale o tema escolhido pela equipe.
+function Teams({ items = [], row = false, per = 3, color }: any) {
   if (!items.length) return <div className="empty">Nenhuma equipe encontrada.</div>;
   const blocks = items.map((t: Row) => {
     const complete = t.status === "confirmed" || (t.members != null && t.team_max != null && t.members >= t.team_max);
-    return <article className={"team-block theme-" + (t.card_theme === "lime" ? "lime" : "blue")} key={t.id}><a href={href("/team/" + t.id)} aria-label={"Ver equipe " + t.name}>
+    return <article className={"team-block theme-" + (color ? "event" : t.card_theme === "lime" ? "lime" : "blue")} style={color ? bannerStyle(color) : undefined} key={t.id}><a href={href("/team/" + t.id)} aria-label={"Ver equipe " + t.name}>
       <div className="team-block-head"><span>{t.event_title}</span><Arrow size="25"/></div>
       <div className="team-block-body"><div className="team-block-status"><span className="tag">{status(t.status)}</span>{t.members != null && <span className="team-count" aria-label={t.members + " de " + t.team_max + " integrantes"}>{t.members}/{t.team_max}</span>}</div><div className="team-block-description"><h3>{t.name}</h3>{t.description?.trim() && <p>{t.description}</p>}</div><div className="team-block-needs">{complete ? <strong>Equipe completa!</strong> : <><span>Procuramos:</span><div className="tags">{teamAreas(t).length ? teamAreas(t).map((a) => <span className="tag" key={a}>{a}</span>) : t.skills ? tags(t.skills) : <span className="tag">Novos integrantes</span>}</div></>}</div></div>
     </a></article>;
@@ -2567,7 +2756,7 @@ export default function Hacko() {
                 {official.length > 0 && (
                   <>
                     <h3 className="home-sub">Oficiais da hacko</h3>
-                    <ScrollRow per={5}>
+                    <ScrollRow per={4}>
                       {official.map((e) => (
                         <Card key={e.id} e={e} />
                       ))}
@@ -2584,7 +2773,7 @@ export default function Hacko() {
                 {outside.length > 0 && (
                   <section className="home-outside">
                     <h3 className="home-sub">Fora da hacko - crie sua equipe por aqui!</h3>
-                    <ScrollRow per={5}>
+                    <ScrollRow per={4}>
                       {outside.map((e) => (
                         <OutsideCard key={e.id} e={e} />
                       ))}
@@ -2652,8 +2841,8 @@ export default function Hacko() {
               {o.id && (
                 <ImageInput
                   key={o.logo_v || "none"}
-                  label="Logo da empresa"
-                  help="Quadrada, 400×400. Aparece nos seus hackathons."
+                  label="Logo da empresa (obrigatória)"
+                  help="Quadrada, 400×400. Aparece redonda nos seus hackathons; sem ela não é possível criar hackathons."
                   current={o.logo_v ? imageUrl("logo:" + o.id, o.logo_v) : ""}
                   aspect="square"
                   onChange={(d: string | null) =>
@@ -2871,70 +3060,139 @@ export default function Hacko() {
     if (page === "event" && data.event) {
       const e = data.event;
       const registered = boot.registrations.some((r: Row) => r.event_id === id && r.status === "active");
-      const saved = boot.favorites.some((f: Row) => f.event_id === id);
       return (
         <>
-          <a className="breadcrumb" href="#/">
-            ← Todos os hackathons
-          </a>
-          <img className="cover" src={coverOf(e)} alt={"Capa de " + e.title} />
-          <div className="two-col">
-            <section>
-              <span className="eyebrow">
-                {e.logo_v && <img className="org-logo" src={imageUrl("logo:" + e.org_id, e.logo_v)} alt="" />}
-                {e.organization} · {e.theme}
-              </span>
+          <div className="ev-hero" style={bannerStyle(e.banner_color)}>
+            <a className="ev-back" href="#/">
+              ← Voltar
+            </a>
+            <img src={coverOf(e)} alt={"Capa de " + e.title} />
+          </div>
+          <div className="ev-grid">
+            <aside className="ev-org">
+              <div className="ev-logo">
+                {e.logo_v ? (
+                  <img src={imageUrl("logo:" + e.org_id, e.logo_v)} alt={"Logo de " + e.organization} />
+                ) : (
+                  <span>{(e.organization || "?").slice(0, 2).toUpperCase()}</span>
+                )}
+              </div>
+              <b className="ev-org-name">{e.organization}</b>
+              <ul className="ev-org-facts">
+                <li>
+                  <Icon name="people" />
+                  {e.participants} {e.participants === 1 ? "Participante" : "Participantes"}
+                </li>
+                <li>
+                  <Icon name="stairs" />
+                  {e.stages || 1} {(e.stages || 1) === 1 ? "Etapa" : "Etapas"}
+                </li>
+                {e.source && (
+                  <li>
+                    <Icon name="link" />
+                    <a href={e.source} target="_blank" rel="noreferrer">
+                      Site do evento
+                    </a>
+                  </li>
+                )}
+              </ul>
+              {Object.entries(PARTNER_ROLES).map(([role, title]) => {
+                const list = (data.partners || []).filter((x: Row) => x.role === role);
+                if (role !== "organizer" && !list.length) return null;
+                return (
+                  <Fragment key={role}>
+                    <h3>{title}</h3>
+                    <ul className="ev-org-list">
+                      {role === "organizer" && (
+                        <li>
+                          {e.logo_v ? (
+                            <img className="partner-logo" src={imageUrl("logo:" + e.org_id, e.logo_v)} alt="" />
+                          ) : (
+                            <span className="partner-logo">{(e.organization || "?").slice(0, 1)}</span>
+                          )}
+                          {e.organization}
+                        </li>
+                      )}
+                      {list.map((x: Row) => (
+                        <li key={x.id}>
+                          <PartnerLogo p={x} />
+                          {x.url ? (
+                            <a href={x.url} target="_blank" rel="noreferrer">
+                              {x.name}
+                            </a>
+                          ) : (
+                            x.name
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </Fragment>
+                );
+              })}
+            </aside>
+            <section className="ev-main">
               <h1>{e.title}</h1>
               <p className="prewrap">{e.summary}</p>
-              <div className="facts">
-                <div className="fact">
-                  <b>Quando</b>
-                  {date(e.starts_at)} até {date(e.ends_at)}
-                </div>
-                <div className="fact">
-                  <b>Onde</b>
-                  {e.format} · {e.city}
-                  <br />
-                  {e.venue}
-                </div>
-                <div className="fact">
-                  <b>Inscrições</b>
-                  {date(e.opens_at)} até {date(e.closes_at)}
-                </div>
-                <div className="fact">
-                  <b>Equipes</b>
-                  {e.team_min} a {e.team_max} integrantes
-                </div>
+              <div className="ev-box">
+                <Icon name="calendar" />
+                <p>
+                  O evento começa dia <b>{dayMonth(e.starts_at)}</b> até <b>{dayMonth(e.ends_at)}</b> de{" "}
+                  {new Date(e.ends_at).getFullYear()}
+                </p>
               </div>
-              {e.format !== "Online" && (
-                <a
-                  className="button secondary"
-                  href={
-                    "https://www.google.com/maps/search/?api=1&query=" +
-                    encodeURIComponent(e.venue + " " + e.city)
-                  }
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Ver local no mapa ↗
-                </a>
-              )}
-              {e.source && (
-                <a className="button ghost" href={e.source} target="_blank" rel="noreferrer">
-                  Site oficial ↗
-                </a>
-              )}
-              <section className="panel section">
-                <h2>Quem pode participar</h2>
-                <p className="prewrap">{e.eligibility}</p>
+              <div className="ev-box">
+                <Icon name="pin" />
+                <p>
+                  {e.format === "Online" ? (
+                    <>Online · {e.venue}</>
+                  ) : (
+                    <a
+                      href={"https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(e.venue + " " + e.city)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {e.venue} - {e.city}
+                    </a>
+                  )}
+                </p>
+              </div>
+              <div className="ev-box">
+                <Icon name="team" />
+                <p>
+                  Equipes de{" "}
+                  <b>
+                    {e.team_min} a {e.team_max}
+                  </b>{" "}
+                  participantes
+                  <br />
+                  <b>{e.eligibility}</b>
+                </p>
+              </div>
+              <div className="ev-box ev-rules">
                 <h2>Regulamento</h2>
                 <p className="prewrap">{e.rules}</p>
-              </section>
+                {e.rules_url && (
+                  <a href={e.rules_url} target="_blank" rel="noreferrer">
+                    regulamento completo <Arrow size="11" />
+                  </a>
+                )}
+              </div>
             </section>
             <aside className="stack">
-              <section className="panel">
-                <span className="pill">{status(e.status)}</span>
-                <h2>Seu desafio começa aqui</h2>
+              <section className="panel signup-panel">
+                <span className="pill signup-pill">
+                  {({ open: "Inscrições abertas", closed: "Inscrições encerradas", soon: "Em breve", full: "Vagas esgotadas", draft: "Rascunho" } as Record<string, string>)[windowState(e)]}
+                </span>
+                {!(registered && data.myTeam) && (
+                  <h2>
+                    Seu desafio começa aqui <Arrow size="14" />
+                  </h2>
+                )}
+                {!registered && (
+                  <p className="signup-window">
+                    Inscrições de <b>{shortDay(e.opens_at)}</b> até <b>{shortDay(e.closes_at)}</b>
+                  </p>
+                )}
                 {!!e.external && e.source && (
                   <p className="notice">
                     Hackathon de fora da hacko: faça a inscrição oficial no{" "}
@@ -2953,18 +3211,15 @@ export default function Hacko() {
                       </p>
                     ) : registered && data.myTeam ? (
                       (() => {
+                        // Com equipe: só a equipe (sair/dissolver ficam na página da equipe).
                         const t = data.myTeam;
-                        const iLead = t.leader_id === boot.user?.id;
-                        const locked = new Date().toISOString() >= e.starts_at;
                         return (
                           <div className="my-team">
                             <p className="notice">Sua inscrição está confirmada.</p>
-                            <span className="eyebrow">SUA EQUIPE</span>
+                            <span className="my-team-label">
+                              Minha equipe {t.members}/{e.team_max}
+                            </span>
                             <h3>{t.name}</h3>
-                            <div className="tags">
-                              <Badge value={formationOf(t, e)} />
-                              {locked && <Badge value={deliveryOf(t, e)} />}
-                            </div>
                             <ul className="my-team-people">
                               {t.people.map((m: Row) => (
                                 <li key={m.id}>
@@ -2973,8 +3228,8 @@ export default function Hacko() {
                                     <b>
                                       {m.name}
                                       {m.id === t.leader_id && <span className="pill">Líder</span>}
-                                      {m.id === boot.user?.id && <small> (você)</small>}
                                     </b>
+                                    {m.id === boot.user?.id && <small className="me">(você)</small>}
                                     <a href={"mailto:" + m.email}>{m.email}</a>
                                     {m.skills && <small>{m.skills}</small>}
                                   </div>
@@ -2984,32 +3239,6 @@ export default function Hacko() {
                             <a className="button" href={href("/team/" + t.id)}>
                               Abrir página da equipe
                             </a>
-                            {locked ? (
-                              <small>
-                                O evento já começou: a formação das equipes e as inscrições estão travadas.
-                              </small>
-                            ) : (
-                              <div className="actions">
-                                {iLead
-                                  ? button(
-                                      "Dissolver equipe",
-                                      { op: "team.dissolve", id: t.id },
-                                      "Dissolver a equipe? Todos os integrantes ficarão sem equipe.",
-                                    )
-                                  : button(
-                                      "Sair da equipe",
-                                      { op: "team.leave", id: t.id },
-                                      "Sair desta equipe?",
-                                    )}
-                                {button(
-                                  "Cancelar inscrição",
-                                  { op: "cancel", id },
-                                  iLead && t.members > 1
-                                    ? "Você lidera uma equipe com outros integrantes: dissolva a equipe antes. Tentar mesmo assim?"
-                                    : "Cancelar sua inscrição? Você também sairá da equipe " + t.name + ".",
-                                )}
-                              </div>
-                            )}
                           </div>
                         );
                       })()
@@ -3018,19 +3247,19 @@ export default function Hacko() {
                         <p className="notice">
                           Sua inscrição está confirmada. Agora, monte ou encontre uma equipe.
                         </p>
-                        <div className="actions">
+                        <div className="signup-actions">
                           <a className="button" href={href("/create/" + id)}>
                             Criar equipe
                           </a>
                           <a className="button secondary" href={href("/teams/" + id)}>
                             Buscar equipe
                           </a>
-                        </div>
-                        {button(
+                          {button(
                           "Cancelar inscrição",
                           { op: "cancel", id },
                           "Cancelar sua inscrição neste evento?",
                         )}
+                        </div>
                       </>
                     ) : windowState(e) !== "open" ? (
                       <p className="notice">
@@ -3052,34 +3281,19 @@ export default function Hacko() {
                           <input type="checkbox" name="accept" required />
                           Li e aceito o regulamento e declaro atender aos critérios de elegibilidade.
                         </label>
-                        <small>
-                          Seu perfil e e-mail serão compartilhados com a organização para administrar a
-                          inscrição.
-                        </small>
                       </Form>
                     )}
-                    {button(saved ? "♥ Remover dos favoritos" : "♡ Salvar evento", {
-                      op: "favorite",
-                      id,
-                      saved: !saved,
-                    })}
                   </>
                 )}
               </section>
-              <section className="panel dark">
-                <h3>Melhor, em equipe.</h3>
-                <p>Encontre pessoas com competências que complementam as suas.</p>
-                <a href={href("/teams/" + id)} className="button">
-                  Explorar equipes
-                </a>
-              </section>
             </aside>
           </div>
+          <Timeline e={e} />
           <div className="section-head">
             <h2>Equipes do evento</h2>
           </div>
           <AreaFilter value={teamArea} onChange={setTeamArea} />
-          <Teams row items={(data.teams || []).filter((t: Row) => !teamArea || teamAreas(t).includes(teamArea))} />
+          <Teams row color={e.banner_color || "blue"} items={(data.teams || []).filter((t: Row) => !teamArea || teamAreas(t).includes(teamArea))} />
           <div className="section-head">
             <h2>Conheça participantes</h2>
             <small>Perfis com visibilidade ativada</small>
@@ -3491,7 +3705,8 @@ export default function Hacko() {
           <EventForm
             event={e}
             busy={busy}
-            save={async (v: Row, cover?: string | null) => {
+            save={async (v: Row, imgs: Row) => {
+              const pending = (["cover", "card"] as const).filter((k) => imgs[k] !== undefined);
               const d = await mutate(
                 {
                   op: "event.save",
@@ -3499,10 +3714,14 @@ export default function Hacko() {
                   orgId: page === "new" ? id : undefined,
                   data: v,
                 },
-                cover === undefined ? "/manage/:id" : undefined,
+                pending.length ? undefined : "/manage/:id",
               );
-              if (d?.id && cover !== undefined)
-                await mutate({ op: "image.upload", kind: "cover", id: d.id, data: cover }, "/manage/" + d.id);
+              for (const [i, k] of pending.entries())
+                if (d?.id)
+                  await mutate(
+                    { op: "image.upload", kind: k, id: d.id, data: imgs[k] },
+                    i === pending.length - 1 ? "/manage/" + d.id : undefined,
+                  );
             }}
           />
         </section>
@@ -3549,6 +3768,16 @@ export default function Hacko() {
               }}
             />
           )}
+          <PartnersPanel
+            partners={data.partners || []}
+            busy={busy}
+            onSave={(body: Row) => mutate({ op: "partner.save", id, ...body })}
+            onMove={(partnerId: string, dir: number) => mutate({ op: "partner.move", id, partnerId, dir })}
+            onDelete={async (p: Row) => {
+              if (await askConfirm("Remover " + p.name + " da página do hackathon?"))
+                mutate({ op: "partner.delete", id, partnerId: p.id });
+            }}
+          />
           <EventDashboard
             data={data}
             busy={busy}
@@ -3765,16 +3994,7 @@ export default function Hacko() {
         ) : (
           content()
         )}
-        <footer>
-          <span>
-            <Logo arrow="var(--blue)" /> O seu próximo <span className="blue-text">desafio</span> é aqui
-          </span>
-          <span>
-            <a href="/privacidade">Privacidade</a> · <a href="/termos">Termos de uso</a> · Fotos ilustrativas
-            · Unsplash
-          </span>
-        </footer>
-        <div className="footer-arrows" aria-hidden="true" />
+        <SiteFooter />
       </main>
       <nav className="bottom" aria-label="Atalhos mobile">
         <a href="#/">Explorar</a>
@@ -3823,6 +4043,8 @@ function Invite({ eventId, invite, busy }: any) {
 function EventForm({ event = {}, save, busy }: any) {
   // undefined = unchanged, null = remove, string = new data URL
   const cover = useRef<string | null | undefined>(undefined);
+  const card = useRef<string | null | undefined>(undefined);
+  const [imgError, setImgError] = useState("");
   const local = (s: string) =>
     s
       ? new Date(new Date(s).getTime() - new Date(s).getTimezoneOffset() * 60000).toISOString().slice(0, 16)
@@ -3835,9 +4057,16 @@ function EventForm({ event = {}, save, busy }: any) {
         for (const k of ["starts_at", "ends_at", "opens_at", "closes_at"])
           v[k] = new Date(v[k]).toISOString();
         v.submission_deadline = v.submission_deadline ? new Date(v.submission_deadline).toISOString() : "";
-        for (const k of ["capacity", "team_min", "team_max", "image"]) v[k] = Number(v[k]);
+        for (const k of ["capacity", "team_min", "team_max", "image", "stages"]) v[k] = Number(v[k]);
         v.external = v.external === "on" ? 1 : 0;
-        save(v, cover.current);
+        // Banner e card são obrigatórios: já salvos ou escolhidos agora.
+        const has = (ref: any, saved: any) => (ref.current === undefined ? !!saved : !!ref.current);
+        if (!has(cover, event.cover_v) || !has(card, event.card_v)) {
+          setImgError("Escolha o banner e a imagem do card do hackathon.");
+          return;
+        }
+        setImgError("");
+        save(v, { cover: cover.current, card: card.current });
       }}
     >
       <div className="form-grid">
@@ -3852,6 +4081,14 @@ function EventForm({ event = {}, save, busy }: any) {
         <Field name="city" label="Cidade / UF (ou Online)" value={event.city} required />
         <Field name="venue" label="Local ou plataforma" value={event.venue} required />
         <Field name="source" label="Site oficial (opcional)" type="url" value={event.source} />
+        <Field name="stages" label="Número de etapas" type="number" value={event.stages || 1} required />
+        <Field
+          name="rules_url"
+          label="Regulamento completo (link, opcional)"
+          type="url"
+          value={event.rules_url}
+          help="PDF ou página com o regulamento inteiro."
+        />
       </div>
       <label className="check">
         <input type="checkbox" name="external" defaultChecked={!!event.external} />
@@ -3859,12 +4096,24 @@ function EventForm({ event = {}, save, busy }: any) {
         formam equipes (exige o site oficial).
       </label>
       <ImageInput
-        label="Capa do hackathon"
-        help="JPG, PNG ou WebP. Recortada em 1600×640 (proporção 5:2). Sem capa, usamos a imagem ilustrativa escolhida abaixo."
+        label="Banner da página do hackathon (obrigatório)"
+        help="JPG, PNG ou WebP. Proporção 4:1, ideal 1920×480. Cobre todo o topo da página do hackathon."
         current={event.cover_v ? coverOf(event) : ""}
-        aspect="wide"
+        aspect="banner"
         onChange={(d: string | null) => (cover.current = d)}
       />
+      <ImageInput
+        label="Imagem do card (obrigatória)"
+        help="JPG, PNG ou WebP. Proporção 2:1, ideal 800×400. Aparece nos cards da página inicial e de Meus hackathons."
+        current={event.card_v ? imageUrl("card:" + event.id, event.card_v) : ""}
+        aspect="card"
+        onChange={(d: string | null) => (card.current = d)}
+      />
+      {imgError && (
+        <p className="error" role="alert">
+          {imgError}
+        </p>
+      )}
       <Field
         name="summary"
         label="Descrição — mínimo 20 caracteres"

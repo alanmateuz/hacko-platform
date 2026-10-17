@@ -6,6 +6,7 @@ import {
   companySchema,
   eventSchema,
   organizationSchema,
+  partnerSchema,
   profileSchema,
   teamSchema,
 } from "../../../lib/validation";
@@ -145,7 +146,7 @@ const audit = (org: string, actor: string, action: string, target: string) =>
   );
 const notify = (id: string, message: string) =>
   stmt("INSERT INTO notifications(id,user_id,message,created_at) VALUES(?,?,?,?)", uid(), id, message, now());
-const counts = `(SELECT updated_at FROM images WHERE id='cover:'||e.id) cover_v,(SELECT updated_at FROM images WHERE id='logo:'||e.org_id) logo_v,(SELECT count(*) FROM registrations r WHERE r.event_id=e.id AND r.status='active') participants,(SELECT count(*) FROM teams t WHERE t.event_id=e.id) teams`;
+const counts = `(SELECT updated_at FROM images WHERE id='cover:'||e.id) cover_v,(SELECT updated_at FROM images WHERE id='card:'||e.id) card_v,(SELECT updated_at FROM images WHERE id='logo:'||e.org_id) logo_v,(SELECT count(*) FROM registrations r WHERE r.event_id=e.id AND r.status='active') participants,(SELECT count(*) FROM teams t WHERE t.event_id=e.id) teams`;
 // Pódio: o cartão dourado/prata/bronze vale por 7 dias após a publicação do resultado.
 const PODIUM_THEME: Record<number, string> = { 1: "gold", 2: "silver", 3: "bronze" };
 const PODIUM_FRESH = "strftime('%Y-%m-%dT%H:%M:%fZ','now','-7 days')";
@@ -187,6 +188,13 @@ async function eligible(eventId: string) {
 }
 function snap(e: any, p: any[]) {
   return JSON.stringify({ min: e.team_min, max: e.team_max, people: p });
+}
+// Coorganizadores, patrocinadores e apoiadores do evento, na ordem definida pela empresa.
+function partnerRows(eventId: string) {
+  return all(
+    "SELECT p.id,p.name,p.role,p.url,p.position,(SELECT updated_at FROM images WHERE id='partner:'||p.id) logo_v FROM event_partners p WHERE p.event_id=? ORDER BY p.position,p.created_at",
+    eventId,
+  );
 }
 async function teamRows(eventId?: string) {
   return all(
@@ -305,6 +313,7 @@ export async function GET(request: Request) {
             }
           : null,
         teams: await teamRows(id),
+        partners: await partnerRows(id),
         participants: await all(
           `SELECT p.id,p.name,p.skills,p.bio,p.city,p.availability,p.linkedin,p.github,p.portfolio,p.instagram,p.school,p.workplace,p.area,${themeOf},(SELECT updated_at FROM images WHERE id='avatar:'||p.id) avatar_v,EXISTS(SELECT 1 FROM team_members m WHERE m.user_id=p.id AND m.event_id=r.event_id) in_team FROM profiles p JOIN registrations r ON r.user_id=p.id WHERE r.event_id=? AND r.status='active' AND p.visible=1`,
           id,
@@ -406,9 +415,11 @@ export async function GET(request: Request) {
     if (action === "manage") {
       const e = await ownEvent(id, u.userId);
       const cover = await one("SELECT updated_at FROM images WHERE id=?", "cover:" + id);
+      const card = await one("SELECT updated_at FROM images WHERE id=?", "card:" + id);
       return json({
-        event: { ...e, cover_v: cover?.updated_at || null },
+        event: { ...e, cover_v: cover?.updated_at || null, card_v: card?.updated_at || null },
         placements: await all("SELECT place,team_id,created_at FROM placements WHERE event_id=? ORDER BY place", id),
+        partners: await partnerRows(id),
         registrations: await all(
           "SELECT r.*,p.name,p.email,p.skills,p.availability,p.city,p.bio,p.linkedin,p.github,m.team_id FROM registrations r JOIN profiles p ON p.id=r.user_id LEFT JOIN team_members m ON m.user_id=r.user_id AND m.event_id=r.event_id WHERE r.event_id=?",
           id,
@@ -450,7 +461,7 @@ export async function POST(request: Request) {
     const u = await auth(),
       op = typeof body.op === "string" ? body.op : "",
       id = String(body.id || "");
-    if (op !== "image.upload" && raw.length > 40000) fail("Dados muito grandes.", 413);
+    if (op !== "image.upload" && op !== "partner.save" && raw.length > 40000) fail("Dados muito grandes.", 413);
     // Contas de empresa só organizam: não se inscrevem, não entram em equipes e não têm perfil de participante.
     if (
       u.accountType === "company" &&
@@ -466,8 +477,8 @@ export async function POST(request: Request) {
       );
     if (op === "image.upload") {
       const kind =
-        body.kind === "cover"
-          ? "cover"
+        body.kind === "cover" || body.kind === "card"
+          ? body.kind
           : body.kind === "avatar"
             ? "avatar"
             : body.kind === "logo"
@@ -531,7 +542,12 @@ export async function POST(request: Request) {
         stmt(`DELETE FROM teams WHERE event_id IN (${orgEvents})`, uidv),
         stmt(`DELETE FROM registrations WHERE event_id IN (${orgEvents})`, uidv),
         stmt(`DELETE FROM favorites WHERE event_id IN (${orgEvents})`, uidv),
-        stmt(`DELETE FROM images WHERE id IN (SELECT 'cover:'||id FROM (${orgEvents}))`, uidv),
+        stmt(`DELETE FROM images WHERE id IN (SELECT 'cover:'||id FROM (${orgEvents}) UNION SELECT 'card:'||id FROM (${orgEvents}))`, uidv, uidv),
+        stmt(
+          `DELETE FROM images WHERE id IN (SELECT 'partner:'||id FROM event_partners WHERE event_id IN (${orgEvents}))`,
+          uidv,
+        ),
+        stmt(`DELETE FROM event_partners WHERE event_id IN (${orgEvents})`, uidv),
         stmt("DELETE FROM events WHERE org_id IN (SELECT id FROM organizations WHERE owner_id=?)", uidv),
         stmt("DELETE FROM audit_logs WHERE org_id IN (SELECT id FROM organizations WHERE owner_id=?)", uidv),
         stmt("DELETE FROM organizations WHERE owner_id=?", uidv),
@@ -647,6 +663,8 @@ export async function POST(request: Request) {
       const previous = id ? await ownEvent(id, u.userId) : null;
       const orgId = previous?.org_id || String(body.orgId || "");
       await ownOrg(orgId, u.userId);
+      if (!(await one("SELECT 1 FROM images WHERE id=?", "logo:" + orgId)))
+        fail("Envie a logo da empresa no perfil antes de salvar um hackathon.");
       const eventId = id || uid();
       const cols = Object.keys(d);
       const values = Object.values(d);
@@ -680,6 +698,72 @@ export async function POST(request: Request) {
         ]);
       }
       return json({ id: eventId });
+    }
+    if (op === "partner.save") {
+      // Cria ou edita um parceiro do evento (máx. 12). A logo é opcional e fica em images 'partner:<id>'.
+      const e = await ownEvent(id, u.userId);
+      const d = partnerSchema.parse(body.data);
+      const partnerId = String(body.partnerId || "");
+      if (partnerId) {
+        if (!(await one("SELECT 1 FROM event_partners WHERE id=? AND event_id=?", partnerId, id)))
+          fail("Parceiro não encontrado.", 404);
+      } else if (((await one("SELECT count(*) n FROM event_partners WHERE event_id=?", id)) as any).n >= 12)
+        fail("Limite de 12 parceiros por hackathon.");
+      const pid = partnerId || uid();
+      const logo = body.logo ? parseImage(body.logo) : null;
+      await db().batch([
+        partnerId
+          ? stmt("UPDATE event_partners SET name=?,role=?,url=? WHERE id=?", d.name, d.role, d.url, pid)
+          : stmt(
+              "INSERT INTO event_partners(id,event_id,name,role,url,position,created_at) VALUES(?,?,?,?,?,(SELECT coalesce(max(position),-1)+1 FROM event_partners WHERE event_id=?),?)",
+              pid,
+              id,
+              d.name,
+              d.role,
+              d.url,
+              id,
+              now(),
+            ),
+        ...(logo
+          ? [
+              stmt(
+                "INSERT INTO images(id,mime,data,updated_at) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET mime=excluded.mime,data=excluded.data,updated_at=excluded.updated_at",
+                "partner:" + pid,
+                logo.mime,
+                logo.data,
+                now(),
+              ),
+            ]
+          : body.logo === null
+            ? [stmt("DELETE FROM images WHERE id=?", "partner:" + pid)]
+            : []),
+        audit(e.org_id, u.userId, partnerId ? "partner.updated" : "partner.created", pid),
+      ]);
+      return json({ ok: true, id: pid });
+    }
+    if (op === "partner.delete") {
+      const e = await ownEvent(id, u.userId);
+      const pid = String(body.partnerId || "");
+      if (!(await one("SELECT 1 FROM event_partners WHERE id=? AND event_id=?", pid, id)))
+        fail("Parceiro não encontrado.", 404);
+      await db().batch([
+        stmt("DELETE FROM images WHERE id=?", "partner:" + pid),
+        stmt("DELETE FROM event_partners WHERE id=?", pid),
+        audit(e.org_id, u.userId, "partner.deleted", pid),
+      ]);
+      return json({ ok: true });
+    }
+    if (op === "partner.move") {
+      // Troca a posição com o vizinho (dir -1 sobe, 1 desce).
+      await ownEvent(id, u.userId);
+      const rows = await partnerRows(id);
+      const i = rows.findIndex((p) => p.id === body.partnerId),
+        j = i + (body.dir === -1 ? -1 : 1);
+      if (i < 0) fail("Parceiro não encontrado.", 404);
+      if (j < 0 || j >= rows.length) return json({ ok: true });
+      [rows[i], rows[j]] = [rows[j], rows[i]];
+      await db().batch(rows.map((p, k) => stmt("UPDATE event_partners SET position=? WHERE id=?", k, p.id)));
+      return json({ ok: true });
     }
     if (op === "event.results") {
       // Resultado: equipes em 1º, 2º e 3º lugar (o 3º é opcional). Republicar substitui o anterior.
@@ -743,6 +827,12 @@ export async function POST(request: Request) {
             now(),
             "cover:" + old,
           ),
+          stmt(
+            "INSERT INTO images(id,mime,data,updated_at) SELECT ?,mime,data,? FROM images WHERE id=?",
+            "card:" + n,
+            now(),
+            "card:" + old,
+          ),
           audit(org_id, u.userId, "event.duplicated", n),
         ]);
         return json({ id: n });
@@ -751,6 +841,13 @@ export async function POST(request: Request) {
       if (op === "event.publish") {
         eventSchema.parse(e);
         if (e.ends_at <= now()) fail("Evento encerrado não pode ser publicado.");
+        // Imagens obrigatórias: logo da empresa, banner da página e imagem do card.
+        for (const [key, label] of [
+          ["logo:" + e.org_id, "a logo da empresa"],
+          ["cover:" + id, "o banner do hackathon"],
+          ["card:" + id, "a imagem do card"],
+        ])
+          if (!(await one("SELECT 1 FROM images WHERE id=?", key))) fail("Envie " + label + " antes de publicar.");
       }
       await db().batch([
         stmt("UPDATE events SET status=? WHERE id=?", op === "event.publish" ? "published" : "archived", id),

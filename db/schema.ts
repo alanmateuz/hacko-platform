@@ -62,6 +62,9 @@ export const events = sqliteTable("events", {
   bannerColor: text("banner_color").notNull().default("blue"),
   // 1 = hackathon de fora da hacko (inscrição oficial no site do organizador; aqui só a formação de equipes).
   external: integer("external").notNull().default(0),
+  // Página do evento: número de etapas e link do regulamento completo.
+  stages: integer("stages").notNull().default(1),
+  rulesUrl: text("rules_url").notNull().default(""),
   source: text("source").notNull().default(""),
   status: text("status").notNull().default("draft"),
   createdAt: text("created_at").notNull(),
@@ -285,3 +288,20 @@ export const deliveryItems = sqliteTable("delivery_items", {
   uploadedBy: text("uploaded_by").notNull(),
   createdAt: text("created_at").notNull(),
 });
+
+// Quem aparece na página do hackathon além da empresa: coorganizadores, patrocinadores e apoiadores (logo em images 'partner:<id>').
+export const eventPartners = sqliteTable(
+  "event_partners",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => events.id),
+    name: text("name").notNull(),
+    role: text("role").notNull().default("organizer"),
+    url: text("url").notNull().default(""),
+    position: integer("position").notNull().default(0),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => [check("event_partners_role", sql`${t.role} IN ('organizer','sponsor','supporter')`)],
+);
